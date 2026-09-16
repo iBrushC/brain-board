@@ -17,6 +17,11 @@ const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 2.5;
 const PADDING = 80;
 
+/** Grid cell in board units, doubled or halved so it stays legible at any zoom. */
+const GRID_CELL = 24;
+const GRID_MIN_PX = 14;
+const GRID_MAX_PX = 96;
+
 export type BoardHandle = {
   /** Frames the whole tree in the viewport. */
   fit: () => void;
@@ -28,6 +33,7 @@ type Props = {
   selectedId: string | null;
   handleRef: RefObject<BoardHandle | null>;
   onSelect: (id: string | null) => void;
+  onEdit: (id: string) => void;
   onToggleCollapse: (id: string) => void;
   onAddChild: (id: string) => void;
 };
@@ -40,6 +46,7 @@ export function BoardCanvas({
   selectedId,
   handleRef,
   onSelect,
+  onEdit,
   onToggleCollapse,
   onAddChild,
 }: Props) {
@@ -76,12 +83,46 @@ export function BoardCanvas({
 
   useImperativeHandle(handleRef, () => ({ fit }), [fit]);
 
+  const fitRef = useRef(fit);
+  useEffect(() => {
+    fitRef.current = fit;
+  }, [fit]);
+
   // Keep the board framed while it's being built, so a concept added at the
   // edge doesn't land off-screen. Stops as soon as the user takes the wheel.
+  //
+  // Keyed on the tree's geometry rather than on `layout` itself: editing a
+  // concept produces a fresh layout object with identical measurements, and
+  // re-framing the board out from under someone mid-edit is disorienting.
+  const geometry = `${layout.nodes.length}:${Math.round(layout.width)}:${Math.round(
+    layout.height,
+  )}`;
   useEffect(() => {
     if (userMoved.current || layout.nodes.length === 0) return;
-    fit();
-  }, [fit, layout]);
+    fitRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geometry]);
+
+  // The side panel opens beside the board, which slides the viewport's left
+  // edge across the screen. Shifting the transform by the same amount keeps the
+  // nodes visually still while it animates. Tracked as a screen position, not a
+  // width, so plain window resizing (which moves the right edge) is left alone.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    let lastLeft = viewport.getBoundingClientRect().left;
+    const observer = new ResizeObserver(() => {
+      const left = viewport.getBoundingClientRect().left;
+      const dx = left - lastLeft;
+      if (dx === 0) return;
+      lastLeft = left;
+      setTransform((t) => ({ ...t, x: t.x - dx }));
+    });
+
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
 
   // Wheel-to-zoom, anchored on the pointer. Registered natively because React's
   // wheel listener is passive, so it can't preventDefault the page scroll.
@@ -149,13 +190,18 @@ export function BoardCanvas({
       onClick={(e) => {
         if (e.target === e.currentTarget) onSelect(null);
       }}
-      className={`relative h-full w-full overflow-hidden bg-canvas ${
+      className={`relative h-full w-full select-none overflow-hidden bg-canvas ${
         panning ? "cursor-grabbing" : "cursor-grab"
       }`}
-      style={{ touchAction: "none" }}
+      // The grid lives on the viewport rather than the transformed layer so it
+      // extends past the tree, but it is offset and scaled with the transform so
+      // it still reads as ground the board sits on.
+      style={{ touchAction: "none", ...gridStyle(transform) }}
     >
+      {/* Transparent to the pointer, so a drag that starts anywhere but on a
+          node's own controls still reaches the viewport and pans the board. */}
       <div
-        className="absolute left-0 top-0 origin-top-left"
+        className="pointer-events-none absolute left-0 top-0 origin-top-left"
         style={{
           transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
           width: layout.width || 1,
@@ -163,17 +209,18 @@ export function BoardCanvas({
         }}
       >
         <svg
-          className="pointer-events-none absolute overflow-visible"
+          className="absolute overflow-visible"
           width={layout.width || 1}
           height={layout.height || 1}
         >
           {layout.edges.map((edge) => (
             <path
               key={edge.id}
-              d={elbow(edge.from, edge.to)}
+              d={edge.d}
               fill="none"
               stroke="var(--border-strong)"
-              strokeWidth={1}
+              strokeWidth={1.25}
+              strokeLinecap="round"
             />
           ))}
         </svg>
@@ -184,6 +231,7 @@ export function BoardCanvas({
             placed={placed}
             selected={placed.node.id === selectedId}
             onSelect={onSelect}
+            onEdit={onEdit}
             onToggleCollapse={onToggleCollapse}
             onAddChild={onAddChild}
           />
@@ -197,10 +245,19 @@ export function BoardCanvas({
   );
 }
 
-/** Vertical S-curve between a parent's bottom edge and a child's top edge. */
-function elbow(from: { x: number; y: number }, to: { x: number; y: number }): string {
-  const mid = (from.y + to.y) / 2;
-  return `M ${from.x} ${from.y} C ${from.x} ${mid}, ${to.x} ${mid}, ${to.x} ${to.y}`;
+/** Faint square grid, kept between 14px and 96px on screen at any zoom. */
+function gridStyle({ x, y, k }: Transform): React.CSSProperties {
+  let step = GRID_CELL * k;
+  while (step < GRID_MIN_PX) step *= 2;
+  while (step > GRID_MAX_PX) step /= 2;
+
+  return {
+    backgroundImage:
+      "linear-gradient(to right, var(--grid-line) 1px, transparent 1px), " +
+      "linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px)",
+    backgroundSize: `${step}px ${step}px`,
+    backgroundPosition: `${x}px ${y}px`,
+  };
 }
 
 function clamp(value: number, min: number, max: number): number {

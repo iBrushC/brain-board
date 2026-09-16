@@ -16,6 +16,8 @@
   --accent: #4a5c6b;
   --accent-soft: #e4e8ea;
   --danger: #8a4a42;
+  /* Board grid: barely there, just enough to tell you which way you panned. */
+  --grid-line: rgb(35 34 31 / 0.05);
 }
 
 @theme inline {
@@ -44,6 +46,27 @@ body {
   background: var(--canvas);
   color: var(--ink);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/*
+ * Anything clickable says so under the cursor. Covers the plain <button>s the
+ * board is built from, without having to remember a utility class each time.
+ */
+button:not(:disabled),
+summary,
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* Selection ring for board nodes; an outline so a concept's own colour can own
+ * the border. */
+.is-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* Inputs are flat by default; the border is the only chrome they get. */
@@ -159,4 +182,14 @@ button:focus-visible {
 .prose-note th {
   background: var(--canvas);
   font-weight: 600;
+}
+
+/* Honour a system preference for less motion: the panel snaps instead. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

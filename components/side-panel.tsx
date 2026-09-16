@@ -1,9 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {
+  Ban,
+  Check,
+  CornerDownRight,
+  ExternalLink,
+  Eye,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "@/lib/client";
+import { CONCEPT_COLORS, swatch } from "@/lib/colors";
+import type { ConceptColor } from "@/lib/colors";
 import type { Concept, ConceptLink, ConceptPatch } from "@/lib/types";
 import { Button, inputClass, SectionLabel } from "./ui";
 
@@ -88,8 +102,19 @@ export function SidePanel({
     }
   };
 
+  // A colour is a single click, so it writes straight through rather than
+  // waiting on the text autosave.
+  const setColor = async (color: ConceptColor | null) => {
+    try {
+      await onPatch(concept.id, { color });
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not set the colour.");
+    }
+  };
+
   return (
-    <aside className="flex h-full w-[360px] shrink-0 flex-col border-r border-border-subtle bg-surface">
+    <aside className="flex h-full w-full flex-col border-r border-border-subtle bg-surface">
       <header className="flex items-center justify-between gap-2 border-b border-border-subtle px-3 py-2">
         <span
           className={`text-[10px] uppercase tracking-[0.09em] ${
@@ -101,10 +126,11 @@ export function SidePanel({
         <button
           type="button"
           onClick={onClose}
-          title="Close"
-          className="rounded-sm px-1.5 py-0.5 text-xs text-ink-faint hover:bg-accent-soft hover:text-ink"
+          title="Close panel"
+          aria-label="Close panel"
+          className="flex items-center justify-center rounded-sm p-1 text-ink-faint hover:bg-accent-soft hover:text-ink"
         >
-          ✕
+          <X size={13} strokeWidth={2} aria-hidden />
         </button>
       </header>
 
@@ -122,14 +148,21 @@ export function SidePanel({
           </p>
         )}
 
+        <ColorPicker value={concept.color} onChange={(color) => void setColor(color)} />
+
         <section className="space-y-2">
           <div className="flex items-center justify-between">
             <SectionLabel>Description</SectionLabel>
             <button
               type="button"
               onClick={() => setEditingBody((v) => !v)}
-              className="text-[10px] uppercase tracking-[0.09em] text-ink-faint hover:text-accent"
+              className="flex items-center gap-1 text-[10px] uppercase tracking-[0.09em] text-ink-faint hover:text-accent"
             >
+              {editingBody ? (
+                <Eye size={11} strokeWidth={2} aria-hidden />
+              ) : (
+                <Pencil size={11} strokeWidth={2} aria-hidden />
+              )}
               {editingBody ? "Preview" : "Edit"}
             </button>
           </div>
@@ -150,8 +183,9 @@ export function SidePanel({
             <button
               type="button"
               onClick={() => setEditingBody(true)}
-              className="w-full border border-dashed border-border-subtle px-2.5 py-3 text-left text-[11px] text-ink-faint hover:border-border-strong hover:text-ink-muted"
+              className="flex w-full items-center gap-1.5 border border-dashed border-border-subtle px-2.5 py-3 text-left text-[11px] text-ink-faint hover:border-border-strong hover:text-ink-muted"
             >
+              <Pencil size={12} strokeWidth={1.75} aria-hidden />
               No description yet — click to write one.
             </button>
           )}
@@ -183,10 +217,11 @@ export function SidePanel({
                 <button
                   type="button"
                   title="Remove file"
+                  aria-label={`Remove ${file.label}`}
                   onClick={() => void onRemoveFile(concept.id, file.name)}
-                  className="shrink-0 text-[11px] leading-none text-ink-faint hover:text-danger"
+                  className="shrink-0 text-ink-faint hover:text-danger"
                 >
-                  ✕
+                  <X size={12} strokeWidth={2} aria-hidden />
                 </button>
               </li>
             ))}
@@ -198,8 +233,9 @@ export function SidePanel({
               e.preventDefault();
               void upload(Array.from(e.dataTransfer.files));
             }}
-            className="block cursor-pointer border border-dashed border-border-subtle px-2.5 py-3 text-center text-[11px] text-ink-faint hover:border-border-strong hover:text-ink-muted"
+            className="flex cursor-pointer items-center justify-center gap-1.5 border border-dashed border-border-subtle px-2.5 py-3 text-center text-[11px] text-ink-faint hover:border-border-strong hover:text-ink-muted"
           >
+            <Upload size={12} strokeWidth={1.75} aria-hidden />
             {uploading ? "Copying…" : "Drop files here, or click to choose"}
             <input
               type="file"
@@ -219,12 +255,70 @@ export function SidePanel({
       </div>
 
       <footer className="flex items-center justify-between gap-2 border-t border-border-subtle px-3 py-2">
-        <Button onClick={() => onAddChild(concept.id)}>Add subconcept</Button>
+        <Button onClick={() => onAddChild(concept.id)}>
+          <CornerDownRight size={12} strokeWidth={2} aria-hidden />
+          Add subconcept
+        </Button>
         <Button variant="danger" onClick={() => onDelete(concept.id)}>
+          <Trash2 size={12} strokeWidth={2} aria-hidden />
           Delete
         </Button>
       </footer>
     </aside>
+  );
+}
+
+/** The sixteen pastels, plus a way back to the board's default surface. */
+function ColorPicker({
+  value,
+  onChange,
+}: {
+  value: ConceptColor | null;
+  onChange: (color: ConceptColor | null) => void;
+}) {
+  return (
+    <section className="space-y-2">
+      <SectionLabel>Colour</SectionLabel>
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          title="No colour"
+          aria-label="No colour"
+          aria-pressed={value === null}
+          onClick={() => onChange(null)}
+          className={`flex h-6 w-6 items-center justify-center rounded-sm border bg-surface-raised text-ink-faint hover:border-border-strong ${
+            value === null ? "is-selected border-border-strong" : "border-border-subtle"
+          }`}
+        >
+          <Ban size={12} strokeWidth={1.75} aria-hidden />
+        </button>
+
+        {CONCEPT_COLORS.map((color) => {
+          const tint = swatch(color.key);
+          const active = value === color.key;
+          return (
+            <button
+              key={color.key}
+              type="button"
+              title={color.label}
+              aria-label={color.label}
+              aria-pressed={active}
+              onClick={() => onChange(color.key)}
+              style={{
+                backgroundColor: tint?.fill,
+                borderColor: tint?.border,
+                color: tint?.ink,
+              }}
+              className={`flex h-6 w-6 items-center justify-center rounded-sm border ${
+                active ? "is-selected" : ""
+              }`}
+            >
+              {active && <Check size={12} strokeWidth={2.5} aria-hidden />}
+            </button>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -245,15 +339,14 @@ function LinkEditor({
         <button
           type="button"
           onClick={() => onChange([...links, { label: "", url: "" }])}
-          className="text-[10px] uppercase tracking-[0.09em] text-ink-faint hover:text-accent"
+          className="flex items-center gap-1 text-[10px] uppercase tracking-[0.09em] text-ink-faint hover:text-accent"
         >
+          <Plus size={11} strokeWidth={2} aria-hidden />
           Add
         </button>
       </div>
 
-      {links.length === 0 && (
-        <p className="text-[11px] text-ink-faint">No links yet.</p>
-      )}
+      {links.length === 0 && <p className="text-[11px] text-ink-faint">No links yet.</p>}
 
       <ul className="space-y-1.5">
         {links.map((link, index) => (
@@ -279,9 +372,9 @@ function LinkEditor({
                     target="_blank"
                     rel="noreferrer"
                     title="Open link"
-                    className="shrink-0 border border-border-subtle px-1.5 py-1.5 text-[11px] leading-none text-ink-faint hover:border-accent hover:text-accent"
+                    className="flex shrink-0 items-center border border-border-subtle p-1.5 text-ink-faint hover:border-accent hover:text-accent"
                   >
-                    ↗
+                    <ExternalLink size={12} strokeWidth={2} aria-hidden />
                   </a>
                 )}
               </div>
@@ -289,10 +382,11 @@ function LinkEditor({
             <button
               type="button"
               title="Remove link"
+              aria-label="Remove link"
               onClick={() => onChange(links.filter((_, i) => i !== index))}
-              className="mt-2 shrink-0 text-[11px] leading-none text-ink-faint hover:text-danger"
+              className="mt-2 shrink-0 text-ink-faint hover:text-danger"
             >
-              ✕
+              <X size={12} strokeWidth={2} aria-hidden />
             </button>
           </li>
         ))}

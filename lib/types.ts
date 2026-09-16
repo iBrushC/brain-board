@@ -1,3 +1,5 @@
+import type { ConceptColor } from "./colors";
+
 export type ConceptLink = {
   label: string;
   url: string;
@@ -20,6 +22,8 @@ export type Concept = {
   parentId: string | null;
   /** Sort position among siblings. */
   order: number;
+  /** Pastel tint from the shared palette, or `null` for the default surface. */
+  color: ConceptColor | null;
   links: ConceptLink[];
   files: ConceptFile[];
   createdAt: string;
@@ -33,7 +37,7 @@ export type ConceptNode = Concept & {
 
 /** Patch accepted by the update endpoint. Every field is optional. */
 export type ConceptPatch = Partial<
-  Pick<Concept, "name" | "description" | "parentId" | "order" | "links">
+  Pick<Concept, "name" | "description" | "parentId" | "order" | "links" | "color">
 >;
 
 export type VaultInfo = {

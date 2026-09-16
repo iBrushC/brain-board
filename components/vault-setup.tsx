@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { FolderOpen } from "lucide-react";
 import { api } from "@/lib/client";
 import { Button, inputClass, SectionLabel } from "./ui";
 
@@ -65,6 +66,7 @@ export function VaultSetup({ onReady }: { onReady: (path: string) => void }) {
 
           <div className="pt-2">
             <Button type="submit" variant="primary" disabled={busy || !path.trim()}>
+              <FolderOpen size={12} strokeWidth={2} aria-hidden />
               {busy ? "Opening\u2026" : "Open board"}
             </Button>
           </div>

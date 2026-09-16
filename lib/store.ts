@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
+import { isConceptColor } from "./colors";
 import type { Concept, ConceptFile, ConceptLink, ConceptPatch } from "./types";
 import {
   assertSafeId,
@@ -42,6 +43,9 @@ function parse(raw: string, fallbackId: string): Concept | null {
     description: (match[2] ?? "").trimStart(),
     parentId: typeof meta.parentId === "string" ? meta.parentId : null,
     order: typeof meta.order === "number" ? meta.order : 0,
+    // A colour that is missing, or names a swatch the palette no longer has,
+    // simply falls back to the untinted default.
+    color: isConceptColor(meta.color) ? meta.color : null,
     links: Array.isArray(meta.links)
       ? (meta.links as ConceptLink[])
           .filter((l) => l && typeof l.url === "string")
@@ -125,6 +129,7 @@ export async function createConcept(input: {
     description: "",
     parentId,
     order: siblings.reduce((max, c) => Math.max(max, c.order), -1) + 1,
+    color: null,
     links: [],
     files: [],
     createdAt: now,
@@ -151,6 +156,13 @@ export async function updateConcept(id: string, patch: ConceptPatch): Promise<Co
     description: patch.description ?? current.description,
     parentId: patch.parentId !== undefined ? patch.parentId : current.parentId,
     order: patch.order ?? current.order,
+    // Compared against undefined, not falsy, so `null` can clear the tint.
+    color:
+      patch.color === undefined
+        ? current.color
+        : isConceptColor(patch.color)
+          ? patch.color
+          : null,
     links: patch.links
       ? patch.links
           .filter((l) => l.url.trim())
