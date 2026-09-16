@@ -7,6 +7,8 @@ description, links, and attached files, and can branch into subconcepts.
 Everything is stored as plain files in a folder you choose, so a board stays
 readable, greppable, and version-controllable outside this app.
 
+Made for the Sloan Venture Capital internship.
+
 ## Running it
 
 ```bash
