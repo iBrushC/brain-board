@@ -6,11 +6,14 @@ import { api } from "@/lib/client";
 import { buildTree } from "@/lib/tree";
 import type { Concept, ConceptPatch } from "@/lib/types";
 import { BoardCanvas, type BoardHandle } from "./board-canvas";
+import { FileViewer } from "./file-viewer";
+import { InspectorPanel } from "./inspector-panel";
 import { SidePanel } from "./side-panel";
 import { Button } from "./ui";
 import { VaultSetup } from "./vault-setup";
 
 const PANEL_W = 360;
+const INSPECTOR_W = 340;
 
 export function BoardApp() {
   const [vaultPath, setVaultPath] = useState<string | null>(null);
@@ -21,6 +24,10 @@ export function BoardApp() {
   // node's edit button, so clicking around the board can't drop you out of it
   // mid-sentence.
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Read-only inspector on the right: opens whenever a node is selected, but
+  // stays out of the way until then so clicking around the board is quiet.
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [viewingFile, setViewingFile] = useState<{ conceptId: string; name: string } | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
@@ -60,6 +67,18 @@ export function BoardApp() {
     [concepts, editingId, lastOpenedId],
   );
   const panelOpen = editingId !== null && panelConcept !== null;
+
+  // Mirror of the edit panel's "keep rendering while it slides shut" trick.
+  const [lastInspectedId, setLastInspectedId] = useState<string | null>(null);
+  const inspectId = inspectorOpen ? selectedId : lastInspectedId;
+  if (inspectorOpen && selectedId !== null && selectedId !== lastInspectedId) {
+    setLastInspectedId(selectedId);
+  }
+  const inspectConcept = useMemo(
+    () => concepts.find((c) => c.id === inspectId) ?? null,
+    [concepts, inspectId],
+  );
+  const inspectorShown = inspectorOpen && selectedId !== null && inspectConcept !== null;
 
   /** Replaces one concept in place, so the board doesn't refetch on every keystroke. */
   const mergeConcept = useCallback((updated: Concept) => {
@@ -250,14 +269,53 @@ export function BoardApp() {
               collapsed={collapsed}
               selectedId={selectedId}
               handleRef={boardRef}
-              onSelect={setSelectedId}
+              onSelect={(id) => {
+                setSelectedId(id);
+                if (id !== null) setInspectorOpen(true);
+              }}
               onEdit={setEditingId}
               onToggleCollapse={toggleCollapse}
               onAddChild={(id) => void addConcept(id)}
             />
           )}
         </main>
+
+        {/* Right inspector: same animated-width treatment as the left edit
+            panel, just mirrored across the board. */}
+        <div
+          inert={!inspectorShown}
+          className="h-full shrink-0 overflow-hidden transition-[width,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
+          style={{ width: inspectorShown ? INSPECTOR_W : 0, opacity: inspectorShown ? 1 : 0 }}
+        >
+          <div className="h-full" style={{ width: INSPECTOR_W }}>
+            {inspectConcept && (
+              <InspectorPanel
+                key={inspectConcept.id}
+                concept={inspectConcept}
+                onClose={() => {
+                  setInspectorOpen(false);
+                  setLastInspectedId(selectedId);
+                }}
+                onOpenFile={(conceptId, name) => setViewingFile({ conceptId, name })}
+              />
+            )}
+          </div>
+        </div>
       </div>
+
+      {viewingFile &&
+        (() => {
+          const concept = concepts.find((c) => c.id === viewingFile.conceptId);
+          const file = concept?.files.find((f) => f.name === viewingFile.name);
+          if (!concept || !file) return null;
+          return (
+            <FileViewer
+              key={`${viewingFile.conceptId}/${viewingFile.name}`}
+              target={{ conceptId: concept.id, file }}
+              onClose={() => setViewingFile(null)}
+            />
+          );
+        })()}
     </div>
   );
 }
