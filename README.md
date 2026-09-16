@@ -1,36 +1,110 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Brain Board
 
-## Getting Started
+A board for organizing a hierarchical field — medical technology, in the case it
+was built for — into a top-down tree of concepts. Each concept holds a markdown
+description, links, and attached files, and can branch into subconcepts.
 
-First, run the development server:
+Everything is stored as plain files in a folder you choose, so a board stays
+readable, greppable, and version-controllable outside this app.
+
+## Running it
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000. On first run you'll be asked for a data folder —
+give it an absolute path (e.g. `C:\Users\you\Documents\brain-board`). It's
+created if it doesn't exist, and an existing board there is loaded as-is.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+> This app reads and writes your local filesystem through its own server, so
+> it's meant to be run locally. Deployed somewhere remote, it would read that
+> machine's disk rather than yours.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Using the board
 
-## Learn More
+| Action | How |
+| --- | --- |
+| Pan | Drag empty canvas |
+| Zoom | Scroll wheel (anchors on the cursor) |
+| Re-frame the tree | **Fit** in the header |
+| Open a concept | Click its node |
+| Add a subconcept | **+** on a node, or **Add subconcept** in the panel |
+| Add a top-level concept | **Add root concept** in the header |
+| Collapse a branch | **–** under a node; the badge shows how many are hidden |
+| Attach files | Drop them on the panel's file area, or click to browse |
 
-To learn more about Next.js, take a look at the following resources:
+The board keeps itself framed while you build. Once you pan or zoom it leaves
+the view alone until you press **Fit**.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Edits to the name, description, and links autosave about half a second after you
+stop typing; the panel header shows the save state. Deleting a concept also
+deletes everything beneath it, along with their attachments, and asks first.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## How data is stored
 
-## Deploy on Vercel
+```
+<your folder>/
+  concepts/
+    <id>.md          one file per concept
+  files/
+    <concept-id>/    attachments, copied in on upload
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+A concept file is YAML frontmatter plus the description as ordinary markdown:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```markdown
+---
+id: mu3c7wln-uvjrmz
+name: MRI
+parentId: mu3c7vsg-ioigfj
+order: 0
+links:
+  - label: Low-field MRI review (2025)
+    url: https://example.com/low-field-mri
+files:
+  - name: trial-protocol.pdf
+    label: trial-protocol.pdf
+    size: 24000
+    addedAt: '2026-09-16T00:03:30.639Z'
+createdAt: '2026-09-16T00:03:22.955Z'
+updatedAt: '2026-09-16T00:03:30.639Z'
+---
+
+## Magnetic Resonance Imaging
+
+No ionizing radiation. The core tradeoff is **capital cost** vs
+*soft-tissue resolution*.
+```
+
+The tree is defined entirely by `parentId`, and siblings order by `order`. A
+concept whose parent goes missing resurfaces as a root rather than disappearing.
+
+Which folder you're using is remembered in `.brainboard.json` at the project
+root. That file is gitignored, so the board folder is yours to track separately
+(or not).
+
+## Layout of the code
+
+| Path | Purpose |
+| --- | --- |
+| `lib/vault.ts` | Resolving the data folder, id/filename sanitizing |
+| `lib/store.ts` | Reading and writing concept files and attachments |
+| `lib/tree.ts` | Flat concept list → forest |
+| `lib/layout-tree.ts` | Tidy top-down tree layout |
+| `app/api/**` | Route Handlers for concepts and files |
+| `components/board-canvas.tsx` | Pan, zoom, edges, node placement |
+| `components/side-panel.tsx` | The editor |
+
+File uploads go through a Route Handler rather than a Server Action, since
+Server Action bodies are capped at 1MB by default and papers routinely exceed
+that.
+
+## Not in this version
+
+- Reordering or re-parenting concepts by dragging (the API supports both; there
+  is no UI for it yet)
+- Search across concepts
+- Multiple boards open at once
+- Undo
