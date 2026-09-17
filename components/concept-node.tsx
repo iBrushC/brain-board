@@ -6,6 +6,7 @@ import {
   GitBranch,
   Link2,
   Paperclip,
+  FileText,
   Pencil,
   Plus,
 } from "lucide-react";
@@ -61,8 +62,9 @@ export function ConceptNode({
         <span className="flex items-center gap-2.5 pr-6 opacity-60">
           {childCount > 0 && <Meta icon={GitBranch} count={childCount} />}
           {node.links.length > 0 && <Meta icon={Link2} count={node.links.length} />}
+          {node.description.trim() && <Meta icon={FileText} />}
           {node.files.length > 0 && <Meta icon={Paperclip} count={node.files.length} />}
-          {childCount + node.links.length + node.files.length === 0 && (
+          {childCount + node.links.length + node.files.length === 0 && !node.description.trim() && (
             <span className="text-xs">&mdash;</span>
           )}
         </span>
@@ -120,7 +122,7 @@ export function ConceptNode({
   );
 }
 
-function Meta({ icon: Icon, count }: { icon: LucideIcon; count: number }) {
+function Meta({ icon: Icon, count }: { icon: LucideIcon; count?: number }) {
   return (
     <span className="flex items-center gap-1 text-xs leading-none">
       <Icon size={13} strokeWidth={1.75} aria-hidden />
