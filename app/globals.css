@@ -104,6 +104,16 @@ button:focus-visible {
   margin-top: 0.7em;
 }
 
+/* Kill the first element's top margin so the box padding is the only top
+ * inset — otherwise a leading heading makes the top look over-padded. */
+.prose-note > :first-child {
+  margin-top: 0;
+}
+
+.prose-note > :last-child {
+  margin-bottom: 0;
+}
+
 .prose-note h1,
 .prose-note h2,
 .prose-note h3,

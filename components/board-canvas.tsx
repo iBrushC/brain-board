@@ -25,6 +25,9 @@ const GRID_MAX_PX = 96;
 export type BoardHandle = {
   /** Frames the whole tree in the viewport. */
   fit: () => void;
+  /** Shifts the board horizontally, in screen px. Called in the same frame the
+   * panel width changes, so the nodes stay visually still during the slide. */
+  shift: (dx: number) => void;
 };
 
 type Props = {
@@ -81,7 +84,15 @@ export function BoardCanvas({
     });
   }, [layout]);
 
-  useImperativeHandle(handleRef, () => ({ fit }), [fit]);
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      fit,
+      shift: (dx: number) =>
+        setTransform((t) => ({ ...t, x: t.x - dx })),
+    }),
+    [fit],
+  );
 
   const fitRef = useRef(fit);
   useEffect(() => {
@@ -103,26 +114,9 @@ export function BoardCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geometry]);
 
-  // The side panel opens beside the board, which slides the viewport's left
-  // edge across the screen. Shifting the transform by the same amount keeps the
-  // nodes visually still while it animates. Tracked as a screen position, not a
-  // width, so plain window resizing (which moves the right edge) is left alone.
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-
-    let lastLeft = viewport.getBoundingClientRect().left;
-    const observer = new ResizeObserver(() => {
-      const left = viewport.getBoundingClientRect().left;
-      const dx = left - lastLeft;
-      if (dx === 0) return;
-      lastLeft = left;
-      setTransform((t) => ({ ...t, x: t.x - dx }));
-    });
-
-    observer.observe(viewport);
-    return () => observer.disconnect();
-  }, []);
+  // Panel-driven viewport resizing is compensated by BoardApp calling `shift`
+  // in the same animation frame as the width change, which avoids the
+  // frame-lag jitter an async ResizeObserver produced.
 
   // Wheel-to-zoom, anchored on the pointer. Registered natively because React's
   // wheel listener is passive, so it can't preventDefault the page scroll.

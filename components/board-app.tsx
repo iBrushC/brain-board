@@ -14,6 +14,55 @@ import { VaultSetup } from "./vault-setup";
 
 const PANEL_W = 360;
 const INSPECTOR_W = 340;
+const PANEL_MS = 300;
+
+/**
+ * Animates a panel's width in JS rather than CSS. Each animation frame yields
+ * the width delta, so the caller can move the board transform in the same
+ * frame and the slide reads as one motion instead of two lagging ones.
+ */
+function useAnimatedPanel(
+  open: boolean,
+  target: number,
+  onDelta?: (dx: number) => void,
+): number {
+  const [width, setWidth] = useState(open ? target : 0);
+  const widthRef = useRef(width);
+  const rafRef = useRef(0);
+
+  useEffect(() => {
+    cancelAnimationFrame(rafRef.current);
+    const from = widthRef.current;
+    const to = open ? target : 0;
+    const delta = to - from;
+
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (delta === 0 || reduced) {
+      if (onDelta) onDelta(delta);
+      widthRef.current = to;
+      setWidth(to);
+      return;
+    }
+
+    const start = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / PANEL_MS);
+      // Matches the previous cubic-bezier(0.16, 1, 0.3, 1) ease-out curve.
+      const eased = 1 - Math.pow(1 - t, 3);
+      const w = from + delta * eased;
+      if (onDelta) onDelta(w - widthRef.current);
+      widthRef.current = w;
+      setWidth(w);
+      if (t < 1) rafRef.current = requestAnimationFrame(step);
+    };
+    rafRef.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafRef.current);
+    // onDelta is stable; width changes are driven by this effect alone.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, target]);
+
+  return width;
+}
 
 export function BoardApp() {
   const [vaultPath, setVaultPath] = useState<string | null>(null);
@@ -79,6 +128,14 @@ export function BoardApp() {
     [concepts, inspectId],
   );
   const inspectorShown = inspectorOpen && selectedId !== null && inspectConcept !== null;
+
+  // Only the left panel moves the board viewport's left edge, so only it
+  // compensates the transform; the right inspector just moves the right edge.
+  const shiftBoard = useCallback((dx: number) => {
+    boardRef.current?.shift(dx);
+  }, []);
+  const panelWidth = useAnimatedPanel(panelOpen, PANEL_W, shiftBoard);
+  const inspectorWidth = useAnimatedPanel(inspectorShown, INSPECTOR_W);
 
   /** Replaces one concept in place, so the board doesn't refetch on every keystroke. */
   const mergeConcept = useCallback((updated: Concept) => {
@@ -225,13 +282,13 @@ export function BoardApp() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {/* Width, not display, so opening and closing the panel is a slide
-            rather than a jump. The inner column keeps its full width while the
-            wrapper collapses, so the contents don't reflow on the way out. */}
+        {/* Width is animated in JS (see useAnimatedPanel) so the board can
+            compensate in the same frame; the inner column keeps its full width
+            so the contents don't reflow on the way out. */}
         <div
           inert={!panelOpen}
-          className="h-full shrink-0 overflow-hidden transition-[width,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
-          style={{ width: panelOpen ? PANEL_W : 0, opacity: panelOpen ? 1 : 0 }}
+          className="h-full shrink-0 overflow-hidden transition-opacity duration-300"
+          style={{ width: panelWidth, opacity: panelOpen ? 1 : 0 }}
         >
           <div className="h-full" style={{ width: PANEL_W }}>
             {panelConcept && (
@@ -284,8 +341,8 @@ export function BoardApp() {
             panel, just mirrored across the board. */}
         <div
           inert={!inspectorShown}
-          className="h-full shrink-0 overflow-hidden transition-[width,opacity] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]"
-          style={{ width: inspectorShown ? INSPECTOR_W : 0, opacity: inspectorShown ? 1 : 0 }}
+          className="h-full shrink-0 overflow-hidden transition-opacity duration-300"
+          style={{ width: inspectorWidth, opacity: inspectorShown ? 1 : 0 }}
         >
           <div className="h-full" style={{ width: INSPECTOR_W }}>
             {inspectConcept && (
