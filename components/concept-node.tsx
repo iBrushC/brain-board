@@ -18,6 +18,8 @@ import { NODE_H, NODE_W } from "@/lib/layout-tree";
 type Props = {
   placed: PlacedNode;
   selected: boolean;
+  /** An admin reading someone else's board: no edit or add affordances. */
+  readOnly: boolean;
   onSelect: (id: string) => void;
   onEdit: (id: string) => void;
   onToggleCollapse: (id: string) => void;
@@ -27,6 +29,7 @@ type Props = {
 export function ConceptNode({
   placed,
   selected,
+  readOnly,
   onSelect,
   onEdit,
   onToggleCollapse,
@@ -47,7 +50,9 @@ export function ConceptNode({
       <button
         type="button"
         onClick={() => onSelect(node.id)}
-        onDoubleClick={() => onEdit(node.id)}
+        onDoubleClick={() => {
+          if (!readOnly) onEdit(node.id);
+        }}
         style={
           tint
             ? { backgroundColor: tint.fill, borderColor: tint.border, color: tint.ink }
@@ -71,6 +76,7 @@ export function ConceptNode({
       </button>
 
       {/* The only way into the editor, so the panel never opens on its own. */}
+      {!readOnly && (
       <button
         type="button"
         title="Edit concept"
@@ -82,8 +88,10 @@ export function ConceptNode({
       >
         <Pencil size={12} strokeWidth={2} aria-hidden />
       </button>
+      )}
 
       {/* Add a child. Hidden until hover or selection to keep the board quiet. */}
+      {!readOnly && (
       <button
         type="button"
         title="Add subconcept"
@@ -95,6 +103,7 @@ export function ConceptNode({
       >
         <Plus size={12} strokeWidth={2} aria-hidden />
       </button>
+      )}
 
       {/* Sits on the connector spine, so it reads as the switch for the branch
           hanging below it. */}

@@ -91,7 +91,7 @@ export function InspectorPanel({ concept, onClose, onOpenFile }: Props) {
                       {file.label}
                     </span>
                     <span className="shrink-0 font-mono text-[10px] text-ink-faint">
-                      {fileKind(file.name, file.size) === "other" ? "file" : fileKind(file.name, file.size)}
+                      {fileKind(file.label, file.size) === "other" ? "file" : fileKind(file.label, file.size)}
                     </span>
                   </button>
                 </li>

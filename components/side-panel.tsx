@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api } from "@/lib/client";
 import { CONCEPT_COLORS, swatch } from "@/lib/colors";
 import type { ConceptColor } from "@/lib/colors";
 import type { Concept, ConceptLink, ConceptPatch } from "@/lib/types";
@@ -28,6 +27,7 @@ type Props = {
   onPatch: (id: string, patch: ConceptPatch) => Promise<void>;
   onUpload: (id: string, files: File[]) => Promise<void>;
   onRemoveFile: (id: string, name: string) => Promise<void>;
+  onOpenFile: (id: string, name: string) => void;
   onAddChild: (id: string) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
@@ -40,6 +40,7 @@ export function SidePanel({
   onPatch,
   onUpload,
   onRemoveFile,
+  onOpenFile,
   onAddChild,
   onDelete,
   onClose,
@@ -202,15 +203,16 @@ export function SidePanel({
                 key={file.name}
                 className="flex items-center gap-2 border border-border-subtle bg-surface-raised px-2 py-1.5"
               >
-                <a
-                  href={api.fileUrl(concept.id, file.name)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="min-w-0 flex-1 truncate text-[11px] text-ink hover:text-accent hover:underline"
-                  title={file.label}
+                {/* Opens the in-app viewer rather than linking out: the
+                    bucket is private, so a URL only exists once signed. */}
+                <button
+                  type="button"
+                  onClick={() => onOpenFile(concept.id, file.name)}
+                  className="min-w-0 flex-1 truncate text-left text-[11px] text-ink hover:text-accent hover:underline"
+                  title={`View ${file.label}`}
                 >
                   {file.label}
-                </a>
+                </button>
                 <span className="shrink-0 font-mono text-[10px] text-ink-faint">
                   {formatSize(file.size)}
                 </span>
@@ -249,7 +251,8 @@ export function SidePanel({
             />
           </label>
           <p className="text-[10px] text-ink-faint">
-            Files are copied into the board folder, so it stays self-contained.
+            Files are stored with the board, and only readable by people who can
+            open it.
           </p>
         </section>
       </div>

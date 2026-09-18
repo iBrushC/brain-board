@@ -6,16 +6,21 @@ export type ConceptLink = {
 };
 
 export type ConceptFile = {
-  /** Name as stored on disk inside <data>/files/<conceptId>/ */
+  id: string;
+  /** De-duplicated name, unique within the concept. */
   name: string;
   /** Original name shown in the UI, before de-duplication. */
   label: string;
   size: number;
+  mimeType: string | null;
+  /** Object key in the `board-files` bucket: `<boardId>/<conceptId>/<name>`. */
+  storagePath: string;
   addedAt: string;
 };
 
 export type Concept = {
   id: string;
+  boardId: string;
   name: string;
   /** Full markdown body. */
   description: string;
@@ -35,12 +40,23 @@ export type ConceptNode = Concept & {
   children: ConceptNode[];
 };
 
-/** Patch accepted by the update endpoint. Every field is optional. */
+/** Patch accepted by the update path. Every field is optional. */
 export type ConceptPatch = Partial<
   Pick<Concept, "name" | "description" | "parentId" | "order" | "links" | "color">
 >;
 
-export type VaultInfo = {
-  path: string | null;
+export type Board = {
+  id: string;
+  orgId: string;
+  ownerId: string;
+  name: string;
+  color: ConceptColor | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** A board as it appears in the projects list, without loading its concepts. */
+export type BoardSummary = Board & {
   conceptCount: number;
+  fileCount: number;
 };

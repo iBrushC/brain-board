@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   Building2,
@@ -13,64 +13,86 @@ import {
   Search,
   UserPlus,
   Users,
+  X,
 } from "lucide-react";
-import { swatch } from "@/lib/colors";
+import { inviteMember, revokeInvite, signOut } from "@/app/actions";
 import {
+  displayName,
   formatDate,
   initials,
-  MOCK_ACCOUNTS,
-  MOCK_PROJECTS,
-  MOCK_VIEWER,
-  MOCK_WORKSPACE,
-  type ProjectSummary,
+  type Invite,
+  type Member,
+  type PlacedViewer,
   type Role,
 } from "@/lib/accounts";
+import { api } from "@/lib/client";
+import { swatch } from "@/lib/colors";
+import type { BoardSummary } from "@/lib/types";
 import { Avatar, Button, inputClass, SectionLabel, Segmented } from "./ui";
 
 type View = "list" | "grid";
 
-/** Everyone in the workspace, by id, for resolving a project's owner. */
-const BY_ID = new Map(MOCK_ACCOUNTS.map((account) => [account.id, account]));
+type Props = {
+  viewer: PlacedViewer;
+  boards: BoardSummary[];
+  /** Admin only; empty for a user, who has no one to scope by. */
+  members: Member[];
+  /** Admin only. */
+  invites: Invite[];
+};
 
 /**
  * The file view a signed-in account lands on. A user sees their own boards; an
  * admin sees every board in the workspace, filterable down to one member.
  *
- * Fed by fixtures for now — see `lib/accounts.ts`.
+ * The scoping below is presentation only — the list arrives already filtered by
+ * row-level security, so an admin's "all projects" is the whole organization
+ * and a user's is their own, whatever this component does with it.
  */
-export function ProjectsBrowser() {
+export function ProjectsBrowser({ viewer, boards, members, invites }: Props) {
   const router = useRouter();
-  // No session yet, so the role is a preview switch rather than something the
-  // server told us. It goes away with the first real sign-in.
-  const [role, setRole] = useState<Role>("user");
   const [view, setView] = useState<View>("list");
   const [query, setQuery] = useState("");
   /** Admin rail selection; `null` is the whole workspace. */
   const [memberId, setMemberId] = useState<string | null>(null);
+  const [inviting, setInviting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
-  const admin = role === "admin";
-  const viewer = MOCK_VIEWER[role];
-  const members = useMemo(
-    () => MOCK_ACCOUNTS.filter((account) => account.role === "user"),
-    [],
-  );
+  const admin = viewer.role === "admin";
+  const byId = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
 
   const projects = useMemo(() => {
-    const scope = admin
-      ? MOCK_PROJECTS.filter((p) => memberId === null || p.ownerId === memberId)
-      : MOCK_PROJECTS.filter((p) => p.ownerId === viewer.id);
+    const scope =
+      admin && memberId !== null ? boards.filter((b) => b.ownerId === memberId) : boards;
 
     const q = query.trim().toLowerCase();
     if (!q) return scope;
     return scope.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        (BY_ID.get(p.ownerId)?.name.toLowerCase().includes(q) ?? false),
+      (b) =>
+        b.name.toLowerCase().includes(q) ||
+        (byId.get(b.ownerId)?.name.toLowerCase().includes(q) ?? false),
     );
-  }, [admin, memberId, query, viewer.id]);
+  }, [admin, boards, byId, memberId, query]);
 
-  const conceptTotal = projects.reduce((sum, p) => sum + p.conceptCount, 0);
-  const open = () => router.push("/");
+  const conceptTotal = projects.reduce((sum, b) => sum + b.conceptCount, 0);
+  const open = (id: string) => router.push(`/board/${id}`);
+
+  /**
+   * Admins can't create boards — `can_write_board` requires not being one — so
+   * the control is absent for them rather than present and rejected.
+   */
+  const createBoard = async () => {
+    setCreating(true);
+    setError(null);
+    try {
+      const board = await api.createBoard("Untitled board", viewer.orgId, viewer.id);
+      router.push(`/board/${board.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the project.");
+      setCreating(false);
+    }
+  };
 
   return (
     <div className="flex h-dvh flex-col">
@@ -78,41 +100,35 @@ export function ProjectsBrowser() {
         <span className="text-xs font-semibold tracking-tight">Brain Board</span>
         <ChevronRight size={12} strokeWidth={1.75} className="text-ink-faint" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-xs text-ink-muted">
-          {admin ? MOCK_WORKSPACE : "Your projects"}
+          {admin ? viewer.orgName : "Your projects"}
         </span>
 
-        {/* Preview control: stands in for whichever role the session carries. */}
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-[0.09em] text-ink-faint">
-            Preview as
-          </span>
-          <Segmented
-            label="Preview account type"
-            value={role}
-            onChange={(next) => {
-              setRole(next);
-              setMemberId(null);
-            }}
-            options={[
-              { value: "user", label: "User" },
-              { value: "admin", label: "Admin" },
-            ]}
-          />
-        </div>
+        {error && (
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            className="max-w-xs truncate text-[11px] text-danger hover:underline"
+            title={`${error} (click to dismiss)`}
+          >
+            {error}
+          </button>
+        )}
 
         <div className="flex items-center gap-2 border-l border-border-subtle pl-3">
-          <Avatar initials={initials(viewer.name)} />
+          <Avatar initials={initials(displayName(viewer.name, viewer.email))} />
           <div className="leading-tight">
-            <div className="text-[11px] text-ink">{viewer.name}</div>
+            <div className="text-[11px] text-ink">{displayName(viewer.name, viewer.email)}</div>
             <div className="text-[10px] text-ink-faint">{viewer.email}</div>
           </div>
           <RoleBadge role={viewer.role} />
         </div>
 
-        <Button variant="ghost" onClick={() => router.push("/login")} title="Sign out">
-          <LogOut size={12} strokeWidth={2} aria-hidden />
-          Sign out
-        </Button>
+        <form action={signOut}>
+          <Button type="submit" variant="ghost" title="Sign out">
+            <LogOut size={12} strokeWidth={2} aria-hidden />
+            Sign out
+          </Button>
+        </form>
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -122,7 +138,7 @@ export function ProjectsBrowser() {
               <SectionLabel>Workspace</SectionLabel>
               <div className="flex items-center gap-1.5 text-xs text-ink">
                 <Building2 size={12} strokeWidth={1.75} className="text-ink-faint" aria-hidden />
-                <span className="truncate">{MOCK_WORKSPACE}</span>
+                <span className="truncate">{viewer.orgName}</span>
               </div>
             </div>
 
@@ -134,7 +150,7 @@ export function ProjectsBrowser() {
               <MemberRow
                 icon={<Users size={12} strokeWidth={1.75} aria-hidden />}
                 label="All projects"
-                count={MOCK_PROJECTS.length}
+                count={boards.length}
                 selected={memberId === null}
                 onSelect={() => setMemberId(null)}
               />
@@ -143,22 +159,50 @@ export function ProjectsBrowser() {
                 {members.map((member) => (
                   <li key={member.id}>
                     <MemberRow
-                      icon={<Avatar initials={initials(member.name)} size={18} />}
-                      label={member.name}
-                      count={MOCK_PROJECTS.filter((p) => p.ownerId === member.id).length}
+                      icon={
+                        <Avatar
+                          initials={initials(displayName(member.name, member.email))}
+                          size={18}
+                        />
+                      }
+                      label={displayName(member.name, member.email)}
+                      count={boards.filter((b) => b.ownerId === member.id).length}
                       selected={memberId === member.id}
                       onSelect={() => setMemberId(member.id)}
                     />
                   </li>
                 ))}
               </ul>
+
+              {invites.length > 0 && (
+                <div className="mt-4">
+                  <div className="px-1 pb-2">
+                    <SectionLabel>Invited</SectionLabel>
+                  </div>
+                  <ul className="space-y-0.5">
+                    {invites.map((invite) => (
+                      <li key={invite.id}>
+                        <PendingInvite invite={invite} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
             <div className="border-t border-border-subtle p-2">
-              <Button variant="ghost" className="w-full justify-start">
-                <UserPlus size={12} strokeWidth={2} aria-hidden />
-                Invite member
-              </Button>
+              {inviting ? (
+                <InviteForm onDone={() => setInviting(false)} />
+              ) : (
+                <Button
+                  variant="ghost"
+                  className="w-full justify-start"
+                  onClick={() => setInviting(true)}
+                >
+                  <UserPlus size={12} strokeWidth={2} aria-hidden />
+                  Invite member
+                </Button>
+              )}
             </div>
           </aside>
         )}
@@ -201,19 +245,36 @@ export function ProjectsBrowser() {
               ]}
             />
 
-            <Button variant="primary">
-              <Plus size={12} strokeWidth={2} aria-hidden />
-              New project
-            </Button>
+            {!admin && (
+              <Button variant="primary" disabled={creating} onClick={() => void createBoard()}>
+                <Plus size={12} strokeWidth={2} aria-hidden />
+                {creating ? "Creating…" : "New project"}
+              </Button>
+            )}
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             {projects.length === 0 ? (
-              <EmptyState searching={query.trim() !== ""} />
+              <EmptyState
+                searching={query.trim() !== ""}
+                admin={admin}
+                creating={creating}
+                onCreate={() => void createBoard()}
+              />
             ) : view === "list" ? (
-              <ProjectList projects={projects} showOwner={admin} onOpen={open} />
+              <ProjectList
+                projects={projects}
+                owners={byId}
+                showOwner={admin}
+                onOpen={open}
+              />
             ) : (
-              <ProjectGrid projects={projects} showOwner={admin} onOpen={open} />
+              <ProjectGrid
+                projects={projects}
+                owners={byId}
+                showOwner={admin}
+                onOpen={open}
+              />
             )}
           </div>
 
@@ -229,6 +290,8 @@ export function ProjectsBrowser() {
                 <span>
                   {members.length} member{members.length === 1 ? "" : "s"}
                 </span>
+                <span aria-hidden>·</span>
+                <span>read-only</span>
               </>
             )}
           </div>
@@ -242,6 +305,7 @@ function RoleBadge({ role }: { role: Role }) {
   const admin = role === "admin";
   return (
     <span
+      title={admin ? "Admins can read every board in the workspace, but not edit them" : undefined}
       className={`rounded-sm border px-1.5 py-0.5 text-[9px] uppercase tracking-[0.09em] ${
         admin
           ? "border-accent bg-accent-soft text-accent"
@@ -250,6 +314,76 @@ function RoleBadge({ role }: { role: Role }) {
     >
       {role}
     </span>
+  );
+}
+
+function InviteForm({ onDone }: { onDone: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  return (
+    <form
+      className="space-y-1.5"
+      action={(formData) =>
+        start(async () => {
+          const result = await inviteMember(formData);
+          if (result?.error) setError(result.error);
+          else onDone();
+        })
+      }
+    >
+      <SectionLabel>Invite by email</SectionLabel>
+      <input
+        autoFocus
+        required
+        name="email"
+        type="email"
+        className={inputClass}
+        placeholder="colleague@company.com"
+      />
+      <select name="role" className={inputClass} defaultValue="user">
+        <option value="user">Joins as a user</option>
+        <option value="admin">Joins as an admin</option>
+      </select>
+      {error && <p className="text-[11px] leading-relaxed text-danger">{error}</p>}
+      <div className="flex gap-1.5">
+        <Button type="submit" variant="primary" className="flex-1" disabled={pending}>
+          {pending ? "Sending…" : "Send"}
+        </Button>
+        <Button type="button" variant="ghost" onClick={onDone}>
+          Cancel
+        </Button>
+      </div>
+      <p className="text-[10px] leading-relaxed text-ink-faint">
+        They join the workspace when they sign in with this address.
+      </p>
+    </form>
+  );
+}
+
+function PendingInvite({ invite }: { invite: Invite }) {
+  const [pending, start] = useTransition();
+
+  return (
+    <form
+      action={(formData) => start(async () => void (await revokeInvite(formData)))}
+      className="flex w-full items-center gap-2 px-2 py-1.5 text-[11px] text-ink-muted"
+    >
+      <input type="hidden" name="id" value={invite.id} />
+      <span className="min-w-0 flex-1 truncate" title={invite.email}>
+        {invite.email}
+      </span>
+      <span className="shrink-0 text-[10px] text-ink-faint">{invite.role}</span>
+      <button
+        type="submit"
+        disabled={pending}
+        title="Revoke invitation"
+        aria-label={`Revoke the invitation to ${invite.email}`}
+        className="shrink-0 text-ink-faint hover:text-danger disabled:opacity-45"
+      >
+        <X size={12} strokeWidth={2} aria-hidden />
+      </button>
+    </form>
   );
 }
 
@@ -285,7 +419,7 @@ function MemberRow({
 }
 
 /** Folder glyph tinted with the board's own colour, so rows stay scannable. */
-function ProjectIcon({ color, size = 13 }: { color: ProjectSummary["color"]; size?: number }) {
+function ProjectIcon({ color, size = 13 }: { color: BoardSummary["color"]; size?: number }) {
   const tint = swatch(color);
   return (
     <Folder
@@ -299,12 +433,13 @@ function ProjectIcon({ color, size = 13 }: { color: ProjectSummary["color"]; siz
 }
 
 type ListProps = {
-  projects: ProjectSummary[];
+  projects: BoardSummary[];
+  owners: Map<string, Member>;
   showOwner: boolean;
   onOpen: (id: string) => void;
 };
 
-function ProjectList({ projects, showOwner, onOpen }: ListProps) {
+function ProjectList({ projects, owners, showOwner, onOpen }: ListProps) {
   // Written out in full rather than composed, so Tailwind sees both literals.
   const cols = showOwner
     ? "grid-cols-[minmax(0,1fr)_150px_80px_60px_104px]"
@@ -324,7 +459,7 @@ function ProjectList({ projects, showOwner, onOpen }: ListProps) {
 
       <ul>
         {projects.map((project) => {
-          const owner = BY_ID.get(project.ownerId);
+          const owner = owners.get(project.ownerId);
           return (
             <li key={project.id}>
               <button
@@ -339,8 +474,8 @@ function ProjectList({ projects, showOwner, onOpen }: ListProps) {
 
                 {showOwner && (
                   <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-ink-muted">
-                    <Avatar initials={initials(owner?.name ?? "?")} size={18} />
-                    <span className="truncate">{owner?.name ?? "Unknown"}</span>
+                    <Avatar initials={initials(ownerName(owner))} size={18} />
+                    <span className="truncate">{ownerName(owner)}</span>
                   </span>
                 )}
 
@@ -362,11 +497,11 @@ function ProjectList({ projects, showOwner, onOpen }: ListProps) {
   );
 }
 
-function ProjectGrid({ projects, showOwner, onOpen }: ListProps) {
+function ProjectGrid({ projects, owners, showOwner, onOpen }: ListProps) {
   return (
     <ul className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-2 p-3">
       {projects.map((project) => {
-        const owner = BY_ID.get(project.ownerId);
+        const owner = owners.get(project.ownerId);
         return (
           <li key={project.id}>
             <button
@@ -379,8 +514,8 @@ function ProjectGrid({ projects, showOwner, onOpen }: ListProps) {
 
               {showOwner && (
                 <span className="flex min-w-0 max-w-full items-center gap-1.5 text-[10px] text-ink-muted">
-                  <Avatar initials={initials(owner?.name ?? "?")} size={16} />
-                  <span className="truncate">{owner?.name ?? "Unknown"}</span>
+                  <Avatar initials={initials(ownerName(owner))} size={16} />
+                  <span className="truncate">{ownerName(owner)}</span>
                 </span>
               )}
 
@@ -395,18 +530,35 @@ function ProjectGrid({ projects, showOwner, onOpen }: ListProps) {
   );
 }
 
-function EmptyState({ searching }: { searching: boolean }) {
+/** A board's owner is always in the org, but the rail is only fetched for admins. */
+function ownerName(owner: Member | undefined): string {
+  return owner ? displayName(owner.name, owner.email) : "Unknown";
+}
+
+function EmptyState({
+  searching,
+  admin,
+  creating,
+  onCreate,
+}: {
+  searching: boolean;
+  admin: boolean;
+  creating: boolean;
+  onCreate: () => void;
+}) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
       <p className="max-w-sm text-xs leading-relaxed text-ink-muted">
         {searching
           ? "No projects match that search."
-          : "No projects here yet. A project is one board — a whole field, branched into concepts."}
+          : admin
+            ? "Nobody in this workspace has made a board yet. Invite someone, and their boards will show up here."
+            : "No projects here yet. A project is one board — a whole field, branched into concepts."}
       </p>
-      {!searching && (
-        <Button variant="primary">
+      {!searching && !admin && (
+        <Button variant="primary" disabled={creating} onClick={onCreate}>
           <Plus size={12} strokeWidth={2} aria-hidden />
-          New project
+          {creating ? "Creating…" : "New project"}
         </Button>
       )}
     </div>

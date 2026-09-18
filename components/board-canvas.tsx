@@ -35,6 +35,8 @@ type Props = {
   collapsed: Set<string>;
   selectedId: string | null;
   handleRef: RefObject<BoardHandle | null>;
+  /** Hides the per-node editing affordances; panning and collapsing stay. */
+  readOnly?: boolean;
   onSelect: (id: string | null) => void;
   onEdit: (id: string) => void;
   onToggleCollapse: (id: string) => void;
@@ -48,6 +50,7 @@ export function BoardCanvas({
   collapsed,
   selectedId,
   handleRef,
+  readOnly = false,
   onSelect,
   onEdit,
   onToggleCollapse,
@@ -224,6 +227,7 @@ export function BoardCanvas({
             key={placed.node.id}
             placed={placed}
             selected={placed.node.id === selectedId}
+            readOnly={readOnly}
             onSelect={onSelect}
             onEdit={onEdit}
             onToggleCollapse={onToggleCollapse}

@@ -1,16 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FolderOpen, Maximize2, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ChevronLeft, Eye, Maximize2, Plus } from "lucide-react";
 import { api } from "@/lib/client";
 import { buildTree } from "@/lib/tree";
-import type { Concept, ConceptPatch } from "@/lib/types";
+import type { Board, Concept, ConceptPatch } from "@/lib/types";
 import { BoardCanvas, type BoardHandle } from "./board-canvas";
 import { FileViewer } from "./file-viewer";
 import { InspectorPanel } from "./inspector-panel";
 import { SidePanel } from "./side-panel";
 import { Button } from "./ui";
-import { VaultSetup } from "./vault-setup";
 
 const PANEL_W = 360;
 const INSPECTOR_W = 340;
@@ -64,10 +64,18 @@ function useAnimatedPanel(
   return width;
 }
 
-export function BoardApp() {
-  const [vaultPath, setVaultPath] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
-  const [concepts, setConcepts] = useState<Concept[]>([]);
+type Props = {
+  board: Board;
+  /** The whole board, loaded on the server. Edits are applied in place from here on. */
+  initialConcepts: Concept[];
+  /** True when the viewer can read this board but not write to it — i.e. an admin. */
+  readOnly: boolean;
+};
+
+export function BoardApp({ board, initialConcepts, readOnly }: Props) {
+  const router = useRouter();
+  const [name, setName] = useState(board.name);
+  const [concepts, setConcepts] = useState<Concept[]>(initialConcepts);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Kept apart from selection: the panel is an explicit mode you enter from a
   // node's edit button, so clicking around the board can't drop you out of it
@@ -76,31 +84,13 @@ export function BoardApp() {
   // Read-only inspector on the right: opens whenever a node is selected, but
   // stays out of the way until then so clicking around the board is quiet.
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [viewingFile, setViewingFile] = useState<{ conceptId: string; name: string } | null>(null);
+  const [viewingFile, setViewingFile] = useState<{ conceptId: string; name: string } | null>(
+    null,
+  );
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   const boardRef = useRef<BoardHandle>(null);
-
-  const load = useCallback(async () => {
-    const { concepts, vaultPath } = await api.listConcepts();
-    setConcepts(concepts);
-    setVaultPath(vaultPath);
-  }, []);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const vault = await api.getVault();
-        setVaultPath(vault.path);
-        if (vault.path) await load();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Could not load the board.");
-      } finally {
-        setReady(true);
-      }
-    })();
-  }, [load]);
 
   const roots = useMemo(() => buildTree(concepts), [concepts]);
 
@@ -115,7 +105,7 @@ export function BoardApp() {
     () => concepts.find((c) => c.id === (editingId ?? lastOpenedId)) ?? null,
     [concepts, editingId, lastOpenedId],
   );
-  const panelOpen = editingId !== null && panelConcept !== null;
+  const panelOpen = !readOnly && editingId !== null && panelConcept !== null;
 
   // Mirror of the edit panel's "keep rendering while it slides shut" trick.
   const [lastInspectedId, setLastInspectedId] = useState<string | null>(null);
@@ -144,55 +134,61 @@ export function BoardApp() {
 
   const patch = useCallback(
     async (id: string, patch: ConceptPatch) => {
-      mergeConcept(await api.updateConcept(id, patch));
+      const current = concepts.find((c) => c.id === id);
+      if (!current) return;
+      mergeConcept(await api.updateConcept(current, patch));
     },
-    [mergeConcept],
+    [concepts, mergeConcept],
   );
 
-  const addConcept = useCallback(async (parentId: string | null) => {
-    try {
-      const created = await api.createConcept("New concept", parentId);
-      setConcepts((list) => [...list, created]);
-      setSelectedId(created.id);
-      setEditingId(created.id);
-      // A new child is useless hidden behind a collapsed parent.
-      if (parentId) {
-        setCollapsed((set) => {
-          if (!set.has(parentId)) return set;
-          const next = new Set(set);
-          next.delete(parentId);
-          return next;
-        });
+  const addConcept = useCallback(
+    async (parentId: string | null) => {
+      try {
+        const created = await api.createConcept(board.id, "New concept", parentId);
+        setConcepts((list) => [...list, created]);
+        setSelectedId(created.id);
+        setEditingId(created.id);
+        // A new child is useless hidden behind a collapsed parent.
+        if (parentId) {
+          setCollapsed((set) => {
+            if (!set.has(parentId)) return set;
+            const next = new Set(set);
+            next.delete(parentId);
+            return next;
+          });
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not add the concept.");
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add the concept.");
-    }
-  }, []);
+    },
+    [board.id],
+  );
 
   const removeConcept = useCallback(
     async (id: string) => {
       const target = concepts.find((c) => c.id === id);
-      const descendants = countDescendants(concepts, id);
+      if (!target) return;
+
+      const descendants = descendantsOf(concepts, id);
       const detail =
-        descendants > 0
-          ? ` and its ${descendants} subconcept${descendants === 1 ? "" : "s"}`
+        descendants.length > 0
+          ? ` and its ${descendants.length} subconcept${descendants.length === 1 ? "" : "s"}`
           : "";
 
       if (
         !window.confirm(
-          `Delete "${target?.name ?? id}"${detail}? The markdown file${
-            descendants > 0 ? "s" : ""
-          } and any attached files will be removed from disk.`,
+          `Delete "${target.name}"${detail}? Any attached files will be deleted too.`,
         )
       ) {
         return;
       }
 
       try {
-        const deleted = new Set(await api.deleteConcept(id));
-        setConcepts((list) => list.filter((c) => !deleted.has(c.id)));
-        setSelectedId((current) => (current && deleted.has(current) ? null : current));
-        setEditingId((current) => (current && deleted.has(current) ? null : current));
+        await api.deleteConcept(target, descendants);
+        const gone = new Set([id, ...descendants.map((c) => c.id)]);
+        setConcepts((list) => list.filter((c) => !gone.has(c.id)));
+        setSelectedId((current) => (current && gone.has(current) ? null : current));
+        setEditingId((current) => (current && gone.has(current) ? null : current));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not delete the concept.");
       }
@@ -201,13 +197,22 @@ export function BoardApp() {
   );
 
   const uploadFiles = useCallback(
-    async (id: string, files: File[]) => mergeConcept(await api.uploadFiles(id, files)),
-    [mergeConcept],
+    async (id: string, files: File[]) => {
+      const current = concepts.find((c) => c.id === id);
+      if (!current) return;
+      mergeConcept(await api.uploadFiles(current, files));
+    },
+    [concepts, mergeConcept],
   );
 
   const removeFile = useCallback(
-    async (id: string, name: string) => mergeConcept(await api.deleteFile(id, name)),
-    [mergeConcept],
+    async (id: string, fileName: string) => {
+      const current = concepts.find((c) => c.id === id);
+      const file = current?.files.find((f) => f.name === fileName);
+      if (!current || !file) return;
+      mergeConcept(await api.removeFile(current, file));
+    },
+    [concepts, mergeConcept],
   );
 
   const toggleCollapse = useCallback((id: string) => {
@@ -218,35 +223,61 @@ export function BoardApp() {
     });
   }, []);
 
-  if (!ready) {
-    return (
-      <div className="flex min-h-dvh items-center justify-center text-xs text-ink-faint">
-        Loading…
-      </div>
-    );
-  }
-
-  if (!vaultPath) {
-    return (
-      <VaultSetup
-        onReady={(path) => {
-          setVaultPath(path);
-          void load();
-        }}
-      />
-    );
-  }
+  /** Commits the board title on blur; refreshes so the projects list agrees. */
+  const renameBoard = async () => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === board.name) {
+      setName(board.name);
+      return;
+    }
+    try {
+      const updated = await api.updateBoard(board.id, { name: trimmed });
+      setName(updated.name);
+      router.refresh();
+    } catch (err) {
+      setName(board.name);
+      setError(err instanceof Error ? err.message : "Could not rename the board.");
+    }
+  };
 
   return (
     <div className="flex h-dvh flex-col">
       <header className="flex shrink-0 items-center gap-3 border-b border-border-subtle bg-surface px-3 py-2">
-        <span className="text-xs font-semibold tracking-tight">Brain Board</span>
-        <span
-          className="min-w-0 flex-1 truncate font-mono text-[10px] text-ink-faint"
-          title={vaultPath}
-        >
-          {vaultPath}
-        </span>
+        <Button variant="ghost" onClick={() => router.push("/projects")} title="All projects">
+          <ChevronLeft size={12} strokeWidth={2} aria-hidden />
+          Projects
+        </Button>
+
+        {readOnly ? (
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink" title={name}>
+            {name}
+          </span>
+        ) : (
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => void renameBoard()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape") {
+                setName(board.name);
+                e.currentTarget.blur();
+              }
+            }}
+            aria-label="Board name"
+            className="min-w-0 flex-1 rounded-sm border border-transparent bg-transparent px-1 py-0.5 text-xs font-medium text-ink hover:border-border-subtle focus:border-accent focus-visible:outline-none"
+          />
+        )}
+
+        {readOnly && (
+          <span
+            title="Admins can read every board in the workspace, but not edit them"
+            className="flex shrink-0 items-center gap-1 rounded-sm border border-border-subtle px-1.5 py-0.5 text-[9px] uppercase tracking-[0.09em] text-ink-faint"
+          >
+            <Eye size={10} strokeWidth={2} aria-hidden />
+            Read-only
+          </span>
+        )}
 
         {error && (
           <button
@@ -259,25 +290,19 @@ export function BoardApp() {
           </button>
         )}
 
-        <Button onClick={() => void addConcept(null)}>
-          <Plus size={12} strokeWidth={2} aria-hidden />
-          Add root concept
-        </Button>
-        <Button variant="ghost" onClick={() => boardRef.current?.fit()} title="Frame the whole board">
-          <Maximize2 size={12} strokeWidth={2} aria-hidden />
-          Fit
-        </Button>
+        {!readOnly && (
+          <Button onClick={() => void addConcept(null)}>
+            <Plus size={12} strokeWidth={2} aria-hidden />
+            Add root concept
+          </Button>
+        )}
         <Button
           variant="ghost"
-          onClick={() => {
-            setVaultPath(null);
-            setConcepts([]);
-            setSelectedId(null);
-            setEditingId(null);
-          }}
+          onClick={() => boardRef.current?.fit()}
+          title="Frame the whole board"
         >
-          <FolderOpen size={12} strokeWidth={2} aria-hidden />
-          Change folder
+          <Maximize2 size={12} strokeWidth={2} aria-hidden />
+          Fit
         </Button>
       </header>
 
@@ -300,6 +325,9 @@ export function BoardApp() {
                 onPatch={patch}
                 onUpload={uploadFiles}
                 onRemoveFile={removeFile}
+                onOpenFile={(conceptId, fileName) =>
+                  setViewingFile({ conceptId, name: fileName })
+                }
                 onAddChild={(id) => void addConcept(id)}
                 onDelete={(id) => void removeConcept(id)}
                 onClose={() => setEditingId(null)}
@@ -312,13 +340,16 @@ export function BoardApp() {
           {concepts.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
               <p className="max-w-sm text-xs leading-relaxed text-ink-muted">
-                This board is empty. Start with a broad area of the field, then branch
-                into subconcepts from there.
+                {readOnly
+                  ? "This board is empty."
+                  : "This board is empty. Start with a broad area of the field, then branch into subconcepts from there."}
               </p>
-              <Button variant="primary" onClick={() => void addConcept(null)}>
-                <Plus size={12} strokeWidth={2} aria-hidden />
-                Add the first concept
-              </Button>
+              {!readOnly && (
+                <Button variant="primary" onClick={() => void addConcept(null)}>
+                  <Plus size={12} strokeWidth={2} aria-hidden />
+                  Add the first concept
+                </Button>
+              )}
             </div>
           ) : (
             <BoardCanvas
@@ -326,6 +357,7 @@ export function BoardApp() {
               collapsed={collapsed}
               selectedId={selectedId}
               handleRef={boardRef}
+              readOnly={readOnly}
               onSelect={(id) => {
                 setSelectedId(id);
                 if (id !== null) setInspectorOpen(true);
@@ -353,7 +385,9 @@ export function BoardApp() {
                   setInspectorOpen(false);
                   setLastInspectedId(selectedId);
                 }}
-                onOpenFile={(conceptId, name) => setViewingFile({ conceptId, name })}
+                onOpenFile={(conceptId, fileName) =>
+                  setViewingFile({ conceptId, name: fileName })
+                }
               />
             )}
           </div>
@@ -367,8 +401,8 @@ export function BoardApp() {
           if (!concept || !file) return null;
           return (
             <FileViewer
-              key={`${viewingFile.conceptId}/${viewingFile.name}`}
-              target={{ conceptId: concept.id, file }}
+              key={file.id}
+              file={file}
               onClose={() => setViewingFile(null)}
             />
           );
@@ -377,7 +411,8 @@ export function BoardApp() {
   );
 }
 
-function countDescendants(concepts: Concept[], rootId: string): number {
+/** Every concept beneath `rootId`, exclusive of the root itself. */
+function descendantsOf(concepts: Concept[], rootId: string): Concept[] {
   const children = concepts.filter((c) => c.parentId === rootId);
-  return children.reduce((sum, child) => sum + 1 + countDescendants(concepts, child.id), 0);
+  return children.flatMap((child) => [child, ...descendantsOf(concepts, child.id)]);
 }

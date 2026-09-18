@@ -5,8 +5,6 @@ import { Download, X } from "lucide-react";
 import { api } from "@/lib/client";
 import type { ConceptFile } from "@/lib/types";
 
-type FileRef = { conceptId: string; file: ConceptFile };
-
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif|ico)$/i;
 const PDF_EXT = /\.pdf$/i;
 const TEXT_EXT =
@@ -21,30 +19,35 @@ export function fileKind(name: string, size: number): "image" | "pdf" | "text" |
   return "other";
 }
 
-export function FileViewer({ target: { conceptId, file }, onClose }: {
-  target: FileRef;
-  onClose: () => void;
-}) {
-  const kind = fileKind(file.name, file.size);
-  const url = api.fileUrl(conceptId, file.name);
-  const [text, setText] = useState<string | null>(kind === "text" ? null : "");
+export function FileViewer({ file, onClose }: { file: ConceptFile; onClose: () => void }) {
+  const kind = fileKind(file.label, file.size);
+  // The bucket is private, so there is no stable URL to render — every view
+  // mints a short-lived signed one, which is why this starts empty.
+  const [url, setUrl] = useState<string | null>(null);
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (kind !== "text") return;
     let alive = true;
     void (async () => {
       try {
-        const res = await fetch(url);
-        const body = await res.text();
-        if (alive) setText(body);
-      } catch {
-        if (alive) setText("Could not load the file.");
+        const signed = await api.signedFileUrl(file);
+        if (!alive) return;
+        setUrl(signed);
+
+        if (fileKind(file.label, file.size) === "text") {
+          const res = await fetch(signed);
+          const body = await res.text();
+          if (alive) setText(body);
+        }
+      } catch (err) {
+        if (alive) setError(err instanceof Error ? err.message : "Could not open the file.");
       }
     })();
     return () => {
       alive = false;
     };
-  }, [kind, url]);
+  }, [file]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -76,15 +79,17 @@ export function FileViewer({ target: { conceptId, file }, onClose }: {
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <a
-              href={url}
-              download={file.label}
-              title="Download"
-              aria-label={`Download ${file.label}`}
-              className="flex items-center justify-center rounded-sm p-1 text-ink-faint hover:bg-accent-soft hover:text-ink"
-            >
-              <Download size={13} strokeWidth={2} aria-hidden />
-            </a>
+            {url && (
+              <a
+                href={url}
+                download={file.label}
+                title="Download"
+                aria-label={`Download ${file.label}`}
+                className="flex items-center justify-center rounded-sm p-1 text-ink-faint hover:bg-accent-soft hover:text-ink"
+              >
+                <Download size={13} strokeWidth={2} aria-hidden />
+              </a>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -98,38 +103,47 @@ export function FileViewer({ target: { conceptId, file }, onClose }: {
         </header>
 
         <div className="min-h-0 flex-1 overflow-auto bg-surface-raised">
-          {kind === "image" && (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img
-              src={url}
-              alt={file.label}
-              className="mx-auto max-h-full max-w-full object-contain p-3"
-            />
-          )}
-          {kind === "pdf" && <iframe src={url} title={file.label} className="h-full w-full" />}
-          {kind === "text" &&
-            (text === null ? (
-              <p className="p-3 text-[11px] text-ink-faint">Loading…</p>
-            ) : (
-              <pre className="whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-ink">
-                {text}
-              </pre>
-            ))}
-          {kind === "other" && (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-              <p className="text-[11px] text-ink-muted">No preview available for this file type.</p>
-              <a
-                href={url}
-                download={file.label}
-                className="text-[11px] text-accent hover:underline"
-              >
-                Download {file.label}
-              </a>
-            </div>
+          {error ? (
+            <p className="p-3 text-[11px] text-danger">{error}</p>
+          ) : !url ? (
+            <p className="p-3 text-[11px] text-ink-faint">Loading…</p>
+          ) : (
+            <>
+              {kind === "image" && (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={url}
+                  alt={file.label}
+                  className="mx-auto max-h-full max-w-full object-contain p-3"
+                />
+              )}
+              {kind === "pdf" && <iframe src={url} title={file.label} className="h-full w-full" />}
+              {kind === "text" &&
+                (text === null ? (
+                  <p className="p-3 text-[11px] text-ink-faint">Loading…</p>
+                ) : (
+                  <pre className="whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-ink">
+                    {text}
+                  </pre>
+                ))}
+              {kind === "other" && (
+                <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+                  <p className="text-[11px] text-ink-muted">
+                    No preview available for this file type.
+                  </p>
+                  <a
+                    href={url}
+                    download={file.label}
+                    className="text-[11px] text-accent hover:underline"
+                  >
+                    Download {file.label}
+                  </a>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
     </div>
   );
 }
-
