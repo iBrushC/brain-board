@@ -22,6 +22,7 @@ export type Database = {
           name: string
           org_id: string
           owner_id: string
+          tags: Json
           updated_at: string
         }
         Insert: {
@@ -31,6 +32,7 @@ export type Database = {
           name?: string
           org_id: string
           owner_id: string
+          tags?: Json
           updated_at?: string
         }
         Update: {
@@ -40,6 +42,7 @@ export type Database = {
           name?: string
           org_id?: string
           owner_id?: string
+          tags?: Json
           updated_at?: string
         }
         Relationships: [
@@ -121,6 +124,7 @@ export type Database = {
           name: string
           parent_id: string | null
           sort_order: number
+          tag_id: string | null
           updated_at: string
         }
         Insert: {
@@ -133,6 +137,7 @@ export type Database = {
           name?: string
           parent_id?: string | null
           sort_order?: number
+          tag_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -145,6 +150,7 @@ export type Database = {
           name?: string
           parent_id?: string | null
           sort_order?: number
+          tag_id?: string | null
           updated_at?: string
         }
         Relationships: [

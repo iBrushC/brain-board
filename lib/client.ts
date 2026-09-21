@@ -11,7 +11,7 @@ import {
   toFile,
   uniqueFileName,
 } from "./mapping";
-import type { Board, Concept, ConceptFile, ConceptPatch } from "./types";
+import type { Board, Concept, ConceptFile, ConceptPatch, Tag } from "./types";
 
 /**
  * Board and concept writes, straight from the browser to Postgres.
@@ -48,7 +48,7 @@ export const api = {
 
   async updateBoard(
     id: string,
-    patch: { name?: string; color?: ConceptColor | null },
+    patch: { name?: string; color?: ConceptColor | null; tags?: Tag[] },
   ): Promise<Board> {
     const supabase = createClient();
     const { data, error } = await supabase
@@ -57,6 +57,15 @@ export const api = {
         ...(patch.name !== undefined ? { name: patch.name.trim() || "Untitled board" } : {}),
         // Compared against undefined so `null` can clear the tint.
         ...(patch.color !== undefined ? { color: patch.color } : {}),
+        ...(patch.tags !== undefined
+          ? {
+              tags: patch.tags.map((tag) => ({
+                id: tag.id,
+                name: tag.name.trim(),
+                color: tag.color,
+              })),
+            }
+          : {}),
       })
       .eq("id", id)
       .select()
@@ -137,6 +146,7 @@ export const api = {
         ...(patch.parentId !== undefined ? { parent_id: patch.parentId } : {}),
         ...(patch.order !== undefined ? { sort_order: patch.order } : {}),
         ...(patch.color !== undefined ? { color: patch.color } : {}),
+        ...(patch.tagId !== undefined ? { tag_id: patch.tagId } : {}),
         ...(patch.links !== undefined
           ? {
               links: patch.links

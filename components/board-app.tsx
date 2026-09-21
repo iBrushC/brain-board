@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ChevronLeft, Eye, Maximize2, Plus } from "lucide-react";
 import { api } from "@/lib/client";
 import { buildTree } from "@/lib/tree";
-import type { Board, Concept, ConceptPatch } from "@/lib/types";
+import type { Board, Concept, ConceptPatch, Tag } from "@/lib/types";
 import { BoardCanvas, type BoardHandle } from "./board-canvas";
 import { FileViewer } from "./file-viewer";
 import { InspectorPanel } from "./inspector-panel";
@@ -75,6 +75,9 @@ type Props = {
 export function BoardApp({ board, initialConcepts, readOnly }: Props) {
   const router = useRouter();
   const [name, setName] = useState(board.name);
+  // The board's tag vocabulary lives here rather than in the concepts, so every
+  // panel and node reads the same meaning for each colour.
+  const [tags, setTags] = useState<Tag[]>(board.tags);
   const [concepts, setConcepts] = useState<Concept[]>(initialConcepts);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Kept apart from selection: the panel is an explicit mode you enter from a
@@ -139,6 +142,48 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
       mergeConcept(await api.updateConcept(current, patch));
     },
     [concepts, mergeConcept],
+  );
+
+  /** A tag is looked up through the board's vocabulary, falling back to the
+      concept's own raw colour so pre-tag tints keep rendering. */
+  const tagById = useMemo(() => new Map(tags.map((tag) => [tag.id, tag])), [tags]);
+
+  // Tag writes read the vocabulary through a ref, so a tag created after a
+  // remount (or a fast double-create) can never build its list from a stale
+  // snapshot and silently drop the tags that came before it.
+  const tagsRef = useRef(tags);
+  useEffect(() => {
+    tagsRef.current = tags;
+  }, [tags]);
+
+  const createTag = useCallback(
+    async (tagName: string, color: Tag["color"]) => {
+      const tag: Tag = { id: crypto.randomUUID(), name: tagName, color };
+      const next = [...tagsRef.current, tag];
+      const updated = await api.updateBoard(board.id, { tags: next });
+      tagsRef.current = updated.tags;
+      setTags(updated.tags);
+      return updated.tags.find((t) => t.id === tag.id) ?? tag;
+    },
+    [board.id],
+  );
+
+  /** Deleting a tag removes the word, and any concept wearing it falls back to
+      its own raw colour (or none) instead of keeping a dangling reference. */
+  const deleteTag = useCallback(
+    async (id: string) => {
+      const next = tagsRef.current.filter((tag) => tag.id !== id);
+      const updated = await api.updateBoard(board.id, { tags: next });
+      tagsRef.current = updated.tags;
+      setTags(updated.tags);
+
+      const tagged = concepts.filter((c) => c.tagId === id);
+      await Promise.all(tagged.map((c) => api.updateConcept(c, { tagId: null })));
+      setConcepts((list) =>
+        list.map((c) => (c.tagId === id ? { ...c, tagId: null } : c)),
+      );
+    },
+    [board.id, concepts],
   );
 
   const addConcept = useCallback(
@@ -322,7 +367,10 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
               <SidePanel
                 key={panelConcept.id}
                 concept={panelConcept}
+                tags={tags}
                 onPatch={patch}
+                onCreateTag={createTag}
+                onDeleteTag={deleteTag}
                 onUpload={uploadFiles}
                 onRemoveFile={removeFile}
                 onOpenFile={(conceptId, fileName) =>
@@ -354,6 +402,7 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
           ) : (
             <BoardCanvas
               roots={roots}
+              tags={tags}
               collapsed={collapsed}
               selectedId={selectedId}
               handleRef={boardRef}
@@ -381,6 +430,7 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
               <InspectorPanel
                 key={inspectConcept.id}
                 concept={inspectConcept}
+                tag={inspectConcept.tagId ? (tagById.get(inspectConcept.tagId) ?? null) : null}
                 onClose={() => {
                   setInspectorOpen(false);
                   setLastInspectedId(selectedId);

@@ -17,14 +17,18 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CONCEPT_COLORS, swatch } from "@/lib/colors";
 import type { ConceptColor } from "@/lib/colors";
-import type { Concept, ConceptLink, ConceptPatch } from "@/lib/types";
+import type { Concept, ConceptLink, ConceptPatch, Tag } from "@/lib/types";
 import { Button, inputClass, SectionLabel } from "./ui";
 
 const AUTOSAVE_MS = 600;
 
 type Props = {
   concept: Concept;
+  /** This board's tag vocabulary: what each colour means here. */
+  tags: Tag[];
   onPatch: (id: string, patch: ConceptPatch) => Promise<void>;
+  onCreateTag: (name: string, color: ConceptColor) => Promise<Tag>;
+  onDeleteTag: (id: string) => Promise<void>;
   onUpload: (id: string, files: File[]) => Promise<void>;
   onRemoveFile: (id: string, name: string) => Promise<void>;
   onOpenFile: (id: string, name: string) => void;
@@ -37,7 +41,10 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 
 export function SidePanel({
   concept,
+  tags,
   onPatch,
+  onCreateTag,
+  onDeleteTag,
   onUpload,
   onRemoveFile,
   onOpenFile,
@@ -103,14 +110,14 @@ export function SidePanel({
     }
   };
 
-  // A colour is a single click, so it writes straight through rather than
+  // A tag is a single click, so it writes straight through rather than
   // waiting on the text autosave.
-  const setColor = async (color: ConceptColor | null) => {
+  const setTag = async (tagId: string | null) => {
     try {
-      await onPatch(concept.id, { color });
+      await onPatch(concept.id, { tagId });
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not set the colour.");
+      setError(err instanceof Error ? err.message : "Could not set the tag.");
     }
   };
 
@@ -149,7 +156,14 @@ export function SidePanel({
           </p>
         )}
 
-        <ColorPicker value={concept.color} onChange={(color) => void setColor(color)} />
+        <TagPicker
+          tags={tags}
+          value={concept.tagId}
+          onChange={(tagId) => void setTag(tagId)}
+          onCreate={onCreateTag}
+          onDelete={onDeleteTag}
+          onError={(message) => setError(message)}
+        />
 
         <section className="space-y-2">
           <div className="flex items-center justify-between">
@@ -271,22 +285,130 @@ export function SidePanel({
   );
 }
 
-/** The sixteen pastels, plus a way back to the board's default surface. */
-function ColorPicker({
+/**
+ * Assigns one of the board's tags — each a colour plus the word that gives it
+ * meaning — or clears the assignment. New tags are minted here too, so the
+ * vocabulary and its use stay in one place.
+ */
+function TagPicker({
+  tags,
   value,
   onChange,
+  onCreate,
+  onDelete,
+  onError,
 }: {
-  value: ConceptColor | null;
-  onChange: (color: ConceptColor | null) => void;
+  tags: Tag[];
+  value: string | null;
+  onChange: (tagId: string | null) => void;
+  onCreate: (name: string, color: ConceptColor) => Promise<Tag>;
+  onDelete: (id: string) => Promise<void>;
+  onError: (message: string) => void;
 }) {
+  const [composing, setComposing] = useState(false);
+  const [name, setName] = useState("");
+  const [color, setColor] = useState<ConceptColor>(CONCEPT_COLORS[0].key);
+  const [busy, setBusy] = useState(false);
+
+  const create = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setBusy(true);
+    try {
+      const tag = await onCreate(trimmed, color);
+      setName("");
+      setComposing(false);
+      onChange(tag.id);
+      onError("");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Could not create the tag.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (id: string) => {
+    try {
+      await onDelete(id);
+      onError("");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Could not delete the tag.");
+    }
+  };
+
   return (
     <section className="space-y-2">
-      <SectionLabel>Colour</SectionLabel>
+      <div className="flex items-center justify-between">
+        <SectionLabel>Tag</SectionLabel>
+        <button
+          type="button"
+          onClick={() => setComposing((v) => !v)}
+          className="flex items-center gap-1 text-[10px] uppercase tracking-[0.09em] text-ink-faint hover:text-accent"
+        >
+          {composing ? <X size={11} strokeWidth={2} aria-hidden /> : <Plus size={11} strokeWidth={2} aria-hidden />}
+          {composing ? "Cancel" : "New"}
+        </button>
+      </div>
+
+      {composing && (
+        <div className="space-y-1.5 border border-border-subtle bg-surface-raised px-2 py-2">
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void create();
+              }
+              if (e.key === "Escape") setComposing(false);
+            }}
+            placeholder="What does this colour mean?"
+            className={inputClass}
+          />
+          <div className="flex flex-wrap items-center gap-1">
+            {CONCEPT_COLORS.map((entry) => {
+              const tint = swatch(entry.key);
+              const active = color === entry.key;
+              return (
+                <button
+                  key={entry.key}
+                  type="button"
+                  title={entry.label}
+                  aria-label={entry.label}
+                  aria-pressed={active}
+                  onClick={() => setColor(entry.key)}
+                  style={{
+                    backgroundColor: tint?.fill,
+                    borderColor: tint?.border,
+                    color: tint?.ink,
+                  }}
+                  className={`flex h-5 w-5 items-center justify-center rounded-sm border ${
+                    active ? "is-selected" : ""
+                  }`}
+                >
+                  {active && <Check size={11} strokeWidth={2.5} aria-hidden />}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => void create()}
+              disabled={busy || !name.trim()}
+              className="ml-auto flex items-center gap-1 rounded-sm border border-border-subtle px-2 py-1 text-[11px] text-ink hover:border-accent hover:text-accent disabled:pointer-events-none disabled:opacity-50"
+            >
+              <Check size={11} strokeWidth={2} aria-hidden />
+              Add tag
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-1.5">
         <button
           type="button"
-          title="No colour"
-          aria-label="No colour"
+          title="No tag"
+          aria-label="No tag"
           aria-pressed={value === null}
           onClick={() => onChange(null)}
           className={`flex h-6 w-6 items-center justify-center rounded-sm border bg-surface-raised text-ink-faint hover:border-border-strong ${
@@ -296,30 +418,46 @@ function ColorPicker({
           <Ban size={12} strokeWidth={1.75} aria-hidden />
         </button>
 
-        {CONCEPT_COLORS.map((color) => {
-          const tint = swatch(color.key);
-          const active = value === color.key;
+        {tags.map((tag) => {
+          const tint = swatch(tag.color);
+          const active = value === tag.id;
           return (
-            <button
-              key={color.key}
-              type="button"
-              title={color.label}
-              aria-label={color.label}
-              aria-pressed={active}
-              onClick={() => onChange(color.key)}
-              style={{
-                backgroundColor: tint?.fill,
-                borderColor: tint?.border,
-                color: tint?.ink,
-              }}
-              className={`flex h-6 w-6 items-center justify-center rounded-sm border ${
-                active ? "is-selected" : ""
-              }`}
-            >
-              {active && <Check size={12} strokeWidth={2.5} aria-hidden />}
-            </button>
+            <span key={tag.id} className="group/tag relative">
+              <button
+                type="button"
+                title={`Tag as “${tag.name}”`}
+                aria-pressed={active}
+                onClick={() => onChange(tag.id)}
+                style={{
+                  backgroundColor: tint?.fill,
+                  borderColor: tint?.border,
+                  color: tint?.ink,
+                }}
+                className={`flex h-6 items-center gap-1 rounded-sm border px-1.5 text-[11px] leading-none hover:brightness-95 ${
+                  active ? "is-selected" : ""
+                }`}
+              >
+                {active && <Check size={11} strokeWidth={2.5} aria-hidden />}
+                {tag.name}
+              </button>
+              <button
+                type="button"
+                title={`Delete tag “${tag.name}”`}
+                aria-label={`Delete tag ${tag.name}`}
+                onClick={() => void remove(tag.id)}
+                className="absolute -right-1.5 -top-1.5 hidden h-3.5 w-3.5 items-center justify-center rounded-full border border-border-subtle bg-surface-raised text-ink-faint hover:border-danger hover:text-danger group-hover/tag:flex"
+              >
+                <X size={9} strokeWidth={2.5} aria-hidden />
+              </button>
+            </span>
           );
         })}
+
+        {tags.length === 0 && !composing && (
+          <p className="text-[11px] text-ink-faint">
+            No tags yet — add one to give a colour a meaning.
+          </p>
+        )}
       </div>
     </section>
   );

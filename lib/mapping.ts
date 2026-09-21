@@ -1,6 +1,7 @@
 import { isConceptColor } from "./colors";
+import type { ConceptColor } from "./colors";
 import type { Tables } from "./database.types";
-import type { Board, Concept, ConceptFile, ConceptLink } from "./types";
+import type { Board, Concept, ConceptFile, ConceptLink, Tag } from "./types";
 
 /**
  * Postgres rows in, domain objects out. Kept in one place because both the
@@ -34,6 +35,22 @@ export function toFile(row: Tables<"concept_files">): ConceptFile {
   };
 }
 
+/**
+ * `tags` is jsonb on the board, so it arrives as `Json` and is re-checked
+ * here the same way `links` is. A malformed entry is dropped, not fatal.
+ */
+export function toTags(value: unknown): Tag[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const { id, name, color } = entry as { id?: unknown; name?: unknown; color?: unknown };
+    if (typeof id !== "string" || !id) return [];
+    if (typeof name !== "string" || !name.trim()) return [];
+    if (!isConceptColor(color)) return [];
+    return [{ id, name: name.trim(), color: color as ConceptColor }];
+  });
+}
+
 export function toConcept(row: Tables<"concepts">, files: ConceptFile[]): Concept {
   return {
     id: row.id,
@@ -44,6 +61,7 @@ export function toConcept(row: Tables<"concepts">, files: ConceptFile[]): Concep
     order: row.sort_order,
     // A colour the palette no longer has falls back to the untinted default.
     color: isConceptColor(row.color) ? row.color : null,
+    tagId: typeof row.tag_id === "string" ? row.tag_id : null,
     links: toLinks(row.links),
     files,
     createdAt: row.created_at,
@@ -76,6 +94,7 @@ export function toBoard(row: Tables<"boards">): Board {
     ownerId: row.owner_id,
     name: row.name,
     color: isConceptColor(row.color) ? row.color : null,
+    tags: toTags(row.tags),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

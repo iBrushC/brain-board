@@ -5,6 +5,13 @@ export type ConceptLink = {
   url: string;
 };
 
+/** A named meaning for one of the palette colours, scoped to a board. */
+export type Tag = {
+  id: string;
+  name: string;
+  color: ConceptColor;
+};
+
 export type ConceptFile = {
   id: string;
   /** De-duplicated name, unique within the concept. */
@@ -29,6 +36,8 @@ export type Concept = {
   order: number;
   /** Pastel tint from the shared palette, or `null` for the default surface. */
   color: ConceptColor | null;
+  /** Board tag whose colour the concept takes, or `null` for no tag. */
+  tagId: string | null;
   links: ConceptLink[];
   files: ConceptFile[];
   createdAt: string;
@@ -42,7 +51,7 @@ export type ConceptNode = Concept & {
 
 /** Patch accepted by the update path. Every field is optional. */
 export type ConceptPatch = Partial<
-  Pick<Concept, "name" | "description" | "parentId" | "order" | "links" | "color">
+  Pick<Concept, "name" | "description" | "parentId" | "order" | "links" | "color" | "tagId">
 >;
 
 export type Board = {
@@ -51,6 +60,8 @@ export type Board = {
   ownerId: string;
   name: string;
   color: ConceptColor | null;
+  /** Tag vocabulary for this board: what each colour means here. */
+  tags: Tag[];
   createdAt: string;
   updatedAt: string;
 };

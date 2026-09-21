@@ -10,7 +10,7 @@ import {
 } from "react";
 import type { RefObject } from "react";
 import { layoutForest } from "@/lib/layout-tree";
-import type { ConceptNode as ConceptNodeType } from "@/lib/types";
+import type { ConceptNode as ConceptNodeType, Tag } from "@/lib/types";
 import { ConceptNode } from "./concept-node";
 
 const MIN_ZOOM = 0.2;
@@ -32,6 +32,8 @@ export type BoardHandle = {
 
 type Props = {
   roots: ConceptNodeType[];
+  /** The board's tag vocabulary, so nodes tint with the tag's colour. */
+  tags: Tag[];
   collapsed: Set<string>;
   selectedId: string | null;
   handleRef: RefObject<BoardHandle | null>;
@@ -47,6 +49,7 @@ type Transform = { x: number; y: number; k: number };
 
 export function BoardCanvas({
   roots,
+  tags,
   collapsed,
   selectedId,
   handleRef,
@@ -226,6 +229,7 @@ export function BoardCanvas({
           <ConceptNode
             key={placed.node.id}
             placed={placed}
+            tags={tags}
             selected={placed.node.id === selectedId}
             readOnly={readOnly}
             onSelect={onSelect}

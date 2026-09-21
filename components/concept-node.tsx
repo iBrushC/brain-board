@@ -14,9 +14,12 @@ import type { LucideIcon } from "lucide-react";
 import { swatch } from "@/lib/colors";
 import type { PlacedNode } from "@/lib/layout-tree";
 import { NODE_H, NODE_W } from "@/lib/layout-tree";
+import type { Tag } from "@/lib/types";
 
 type Props = {
   placed: PlacedNode;
+  /** The board's tag vocabulary, used to resolve the node's tint. */
+  tags: Tag[];
   selected: boolean;
   /** An admin reading someone else's board: no edit or add affordances. */
   readOnly: boolean;
@@ -28,6 +31,7 @@ type Props = {
 
 export function ConceptNode({
   placed,
+  tags,
   selected,
   readOnly,
   onSelect,
@@ -38,7 +42,11 @@ export function ConceptNode({
   const { node, x, y, hiddenChildren } = placed;
   const collapsed = hiddenChildren > 0;
   const childCount = node.children.length;
-  const tint = swatch(node.color);
+  // The tag wins: a node wearing a tag takes the tag's colour, since the tag
+  // is what the colour *means* here. Without one, any legacy raw tint stays.
+  const tag = node.tagId ? (tags.find((t) => t.id === node.tagId) ?? null) : null;
+  const tint = swatch(tag?.color ?? node.color);
+  const tagTitle = tag ? ` · ${tag.name}` : "";
 
   return (
     // The wrapper stays transparent to the pointer so a drag that starts in the
@@ -50,6 +58,7 @@ export function ConceptNode({
       <button
         type="button"
         onClick={() => onSelect(node.id)}
+        title={`${node.name}${tagTitle}`}
         onDoubleClick={() => {
           if (!readOnly) onEdit(node.id);
         }}
@@ -65,6 +74,11 @@ export function ConceptNode({
         <span className="line-clamp-2 text-base font-medium leading-snug">{node.name}</span>
 
         <span className="flex items-center gap-2.5 pr-6 opacity-60">
+          {tag && (
+            <span className="max-w-24 truncate rounded-sm border border-current px-1 py-px text-[9px] uppercase tracking-[0.07em] leading-[1.4]">
+              {tag.name}
+            </span>
+          )}
           {childCount > 0 && <Meta icon={GitBranch} count={childCount} />}
           {node.links.length > 0 && <Meta icon={Link2} count={node.links.length} />}
           {node.description.trim() && <Meta icon={FileText} />}

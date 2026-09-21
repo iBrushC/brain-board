@@ -1,20 +1,23 @@
 "use client";
 
-import { ExternalLink, FileText, X } from "lucide-react";
+import { ExternalLink, FileText, Tag as TagIcon, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Concept } from "@/lib/types";
+import { swatch } from "@/lib/colors";
+import type { Concept, Tag } from "@/lib/types";
 import { fileKind } from "./file-viewer";
 import { SectionLabel } from "./ui";
 
 type Props = {
   concept: Concept;
+  /** The tag behind the concept's colour, if any — what the tint means. */
+  tag: Tag | null;
   onClose: () => void;
   onOpenFile: (conceptId: string, name: string) => void;
 };
 
 /** Read-only companion to the edit panel: what the concept says, not what it should say. */
-export function InspectorPanel({ concept, onClose, onOpenFile }: Props) {
+export function InspectorPanel({ concept, tag, onClose, onOpenFile }: Props) {
   return (
     <aside className="flex h-full w-full flex-col border-l border-border-subtle bg-surface">
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-3 py-2">
@@ -34,6 +37,29 @@ export function InspectorPanel({ concept, onClose, onOpenFile }: Props) {
         <h2 className="border-b border-border-subtle pb-2 text-sm font-medium leading-snug text-ink">
           {concept.name}
         </h2>
+
+        {tag && (
+          <section className="space-y-2">
+            <SectionLabel>Tag</SectionLabel>
+            {(() => {
+              const tint = swatch(tag.color);
+              return (
+                <span
+                  title={`The colour on this node means “${tag.name}”`}
+                  style={{
+                    backgroundColor: tint?.fill,
+                    borderColor: tint?.border,
+                    color: tint?.ink,
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-sm border px-2 py-1 text-[11px]"
+                >
+                  <TagIcon size={11} strokeWidth={2} aria-hidden />
+                  {tag.name}
+                </span>
+              );
+            })()}
+          </section>
+        )}
 
         <section className="space-y-2">
           <SectionLabel>Description</SectionLabel>
