@@ -139,7 +139,11 @@ async function main() {
 
   if (ownerError) die(`Could not look up ${ownerEmail}: ${ownerError.message}`);
   if (!owner) die(`No account for ${ownerEmail}. Sign in once with that address first.`);
-  if (!owner.org_id) die(`${ownerEmail} hasn't joined a workspace yet — do that first.`);
+  // Placement happens on the account's first page load, not at sign-up, so an
+  // address that has only ever been mailed a link still has no workspace.
+  if (!owner.org_id) {
+    die(`${ownerEmail} has no workspace yet. Open the app once with that address first.`);
+  }
   if (owner.role === "admin") {
     die(`${ownerEmail} is an admin, and admins can't own boards. Import to a user account.`);
   }

@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
+import { load as loadYaml } from "js-yaml";
 import type { ConceptColor } from "./colors";
 import {
   sanitizeFileName,
@@ -167,6 +168,180 @@ export const api = {
 
     const { error } = await supabase.from("concepts").delete().eq("id", concept.id);
     if (error) fail("Could not delete the concept", error);
+  },
+
+  /* ------------------------------------------------------------------- import */
+
+  /**
+   * Lifts a local vault folder (the pre-cloud format: `concepts/*.md` with YAML
+   * frontmatter plus `files/<conceptId>/…` attachments) into a new board, all
+   * from the browser. Mirrors scripts/import-vault.mjs so both paths stay
+   * interchangeable.
+   */
+  async importBoard(
+    orgId: string,
+    ownerId: string,
+    selected: File[],
+  ): Promise<{ board: Board; conceptCount: number; fileCount: number; skipped: number }> {
+    const supabase = createClient();
+
+    // Relative paths look like `<vault>/concepts/x.md` and
+    // `<vault>/files/<conceptId>/<name>`. The first segment names the vault.
+    const entries = selected
+      .map((file) => ({
+        file,
+        segments: (file.webkitRelativePath || file.name).split("/"),
+      }))
+      .filter((e) => e.segments.length >= 2);
+
+    const vaultName = entries[0]?.segments[0] ?? "Imported board";
+
+    type Parsed = {
+      id: string;
+      name: string;
+      description: string;
+      parentId: string | null;
+      order: number;
+      color: ConceptColor | null;
+      links: { label: string; url: string }[];
+      attachments: { name: string; label: string; size: number; file: File }[];
+    };
+
+    const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
+    const COLORS: ReadonlySet<string> = new Set([
+      "rose", "red", "orange", "amber", "yellow", "lime", "green", "emerald",
+      "teal", "cyan", "sky", "blue", "indigo", "violet", "purple", "pink",
+    ]);
+    const MIME: Record<string, string> = {
+      ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+      ".svg": "image/svg+xml", ".md": "text/markdown", ".txt": "text/plain",
+      ".csv": "text/csv", ".json": "application/json",
+    };
+
+    const parsed: Parsed[] = [];
+    const loose: { conceptId: string; file: File }[] = [];
+    let skipped = 0;
+
+    for (const entry of entries) {
+      const [, folder, ...rest] = entry.segments;
+      if (folder === "concepts" && rest.length === 1 && rest[0].endsWith(".md")) {
+        const raw = await entry.file.text();
+        const match = FRONTMATTER.exec(raw);
+        if (!match) {
+          skipped += 1;
+          continue;
+        }
+        let meta: Record<string, unknown>;
+        try {
+          meta = (loadYaml(match[1]) as Record<string, unknown>) ?? {};
+        } catch {
+          skipped += 1;
+          continue;
+        }
+        const str = (v: unknown, fallback = "") => (typeof v === "string" ? v : fallback);
+        const id = str(meta.id) || rest[0].replace(/\.md$/, "");
+        const color = str(meta.color);
+        parsed.push({
+          id,
+          name: str(meta.name, "Untitled").trim() || "Untitled",
+          description: (match[2] ?? "").trimStart(),
+          parentId: typeof meta.parentId === "string" ? meta.parentId : null,
+          order: typeof meta.order === "number" ? meta.order : 0,
+          color: COLORS.has(color) ? (color as ConceptColor) : null,
+          links: Array.isArray(meta.links)
+            ? (meta.links as { label?: unknown; url?: unknown }[])
+                .filter((l) => !!l && typeof l.url === "string")
+                .map((l) => ({ label: str(l.label, l.url as string), url: l.url as string }))
+            : [],
+          attachments: [],
+        });
+      } else if (folder === "files" && rest.length === 2) {
+        loose.push({ conceptId: rest[0], file: entry.file });
+      }
+      // Anything else (dotfiles, stray notes at the root) is ignored.
+    }
+
+    if (parsed.length === 0) fail("No readable concepts in that folder", null);
+
+    const board = await api.createBoard(vaultName, orgId, ownerId);
+
+    // The vault's ids aren't UUIDs, so every concept gets a new one and parent
+    // links are remapped through this table.
+    const newId = new Map(parsed.map((c) => [c.id, crypto.randomUUID()]));
+
+    const { error: insertError } = await supabase
+      .from("concepts")
+      .insert(
+        parsed.map((c) => ({
+          id: newId.get(c.id),
+          board_id: board.id,
+          parent_id: null,
+          name: c.name,
+          description: c.description,
+          sort_order: c.order,
+          color: c.color,
+          links: c.links,
+        })),
+      );
+    if (insertError) fail("Could not insert the concepts", insertError);
+
+    let orphaned = 0;
+    for (const concept of parsed) {
+      if (!concept.parentId) continue;
+      const parent = newId.get(concept.parentId);
+      if (!parent) {
+        orphaned += 1;
+        continue;
+      }
+      const { error } = await supabase
+        .from("concepts")
+        .update({ parent_id: parent })
+        .eq("id", newId.get(concept.id) ?? concept.id);
+      if (error) fail(`Could not link ${concept.name} to its parent`, error);
+    }
+
+    // Attachments join by the vault's own concept id.
+    const byVaultId = new Map(parsed.map((c) => [c.id, c]));
+    let uploaded = 0;
+    for (const { conceptId, file } of loose) {
+      const concept = byVaultId.get(conceptId);
+      if (!concept) {
+        skipped += 1;
+        continue;
+      }
+      const newConceptId = newId.get(conceptId) ?? crypto.randomUUID();
+      const taken = new Set(concept.attachments.map((f) => f.name));
+      const name = uniqueFileName(sanitizeFileName(file.name), taken);
+      const storagePath = storagePathFor(board.id, newConceptId, name);
+
+      const { error: uploadError } = await supabase.storage
+        .from(BUCKET)
+        .upload(storagePath, file, {
+          contentType: file.type || MIME[file.name.toLowerCase().match(/\.[^.]+$/)?.[0] ?? ""] || "application/octet-stream",
+          upsert: false,
+        });
+      if (uploadError) fail(`Could not upload ${file.name}`, uploadError);
+
+      const { error: rowError } = await supabase.from("concept_files").insert({
+        concept_id: newConceptId,
+        board_id: board.id,
+        name,
+        label: file.name,
+        size: file.size,
+        mime_type: file.type || null,
+        storage_path: storagePath,
+      });
+      if (rowError) {
+        await supabase.storage.from(BUCKET).remove([storagePath]);
+        fail(`Could not attach ${file.name}`, rowError);
+      }
+
+      concept.attachments.push({ name, label: file.name, size: file.size, file });
+      uploaded += 1;
+    }
+
+    return { board, conceptCount: parsed.length, fileCount: uploaded, skipped: skipped + orphaned };
   },
 
   /* ------------------------------------------------------------------- files */

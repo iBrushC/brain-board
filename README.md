@@ -6,7 +6,8 @@ description, links, attached files, and an optional colour, and can branch into
 subconcepts.
 
 Boards live in Supabase, scoped to a workspace, so they follow you between
-machines and a workspace admin can read across them.
+machines. Signing in gives you a workspace of your own straight away; an admin
+who reads across it is someone you invite afterwards, if you want one at all.
 
 Made for the Sloan Venture Capital internship.
 
@@ -36,8 +37,10 @@ origin), or the sign-in link will bounce.
 Sign-in is passwordless: you enter an email, Supabase sends a link, and opening
 it signs you in. There is no password to set or reset.
 
-The first time you sign in, you pick a workspace, and that choice sets your
-role for good:
+Nothing stands between that and a board. The first page load calls
+`ensure_placement`, which puts the account in a workspace named after it — or,
+if an invitation was already addressed to that email, in the workspace that sent
+it. Either way you arrive as a **user**, with somewhere to put boards.
 
 | | User | Admin |
 | --- | --- | --- |
@@ -45,17 +48,31 @@ role for good:
 | Other members' boards | not visible | read-only |
 | Members and invitations | — | manages |
 
-Starting a workspace makes you its admin. Joining one — which happens when an
-admin has invited your email address — makes you a user.
+You are never made an admin by your own hand; someone invites you as one.
 
 **Admins can't write to boards.** Not "the buttons are hidden": `can_write_board`
 in the database refuses any insert, update, or delete from an admin, so the
 read-only board view is a reflection of the rule rather than the rule itself.
 That also means an admin has no boards of their own and no "New project" button.
 
-Invitations are addressed to an email, not handed out as codes. An admin invites
-`someone@company.com`; when that person signs in with that address and accepts,
-they land in the workspace.
+### Adding an admin to your work
+
+**Share** in the projects toolbar invites someone by email, as an admin who can
+read every board in the workspace or as a user who keeps their own. That control
+belongs to the workspace's *owner* — the account it was provisioned for, kept in
+`organizations.owner_id` — so being invited into someone else's workspace does
+not let you widen who sees it. An admin can invite too, that being the role's
+job, and the owner sees and can revoke every pending invitation in their own
+workspace.
+
+Invitations are addressed to an email, not handed out as codes. Invite
+`someone@company.com`; when that person signs in with that address, placement
+puts them in the workspace.
+
+If the invitation arrives *after* they already have a workspace of their own, a
+bar on the projects screen offers to take it. Accepting moves the account and
+drops the workspace it left — so it only goes through when that workspace is
+empty, with no boards and nobody else in it.
 
 ## Using the board
 
@@ -89,9 +106,10 @@ deletes everything beneath it, along with their attachments, and asks first.
 
 | Table | Holds |
 | --- | --- |
-| `organizations` | One workspace |
+| `organizations` | One workspace, and the account it was provisioned for |
 | `profiles` | One row per account, mirrored from `auth.users` by a trigger |
 | `organization_invites` | Pending invitations, keyed on email |
+| `ensure_placement()` | Puts a new account in a workspace; idempotent |
 | `boards` | One board, owned by one profile |
 | `concepts` | The tree; `parent_id` defines it, `sort_order` orders siblings |
 | `concept_files` | Attachment metadata |
@@ -114,8 +132,8 @@ SUPABASE_SERVICE_ROLE_KEY=... node scripts/import-vault.mjs \
   --vault "C:\path\to\vault" --owner you@company.com --name "Board name"
 ```
 
-The account must already exist and belong to a workspace, so sign in once
-first. The service role key bypasses row-level security — which is the point,
+The account must already exist and hold a workspace, which happens on its first
+page load — so sign in and open the app once first. The service role key bypasses row-level security — which is the point,
 since the importer writes rows on someone else's behalf — so pass it on the
 command line and keep it out of `.env.local`, which the app loads.
 
@@ -125,14 +143,14 @@ command line and keep it out of `.env.local`, which the app loads.
 | --- | --- |
 | `proxy.ts` | Refreshes the session, bounces signed-out traffic to `/login` |
 | `lib/supabase/*` | The three clients: browser, server, proxy |
-| `lib/auth.ts` | Resolving the signed-in viewer; the gate every page calls |
+| `lib/auth.ts` | Resolving the signed-in viewer, placing it; the gate every page calls |
 | `lib/boards.ts` | Server-side reads for the projects and board screens |
 | `lib/client.ts` | Browser-side board, concept, and file writes |
 | `lib/mapping.ts` | Postgres rows ↔ the shapes the UI renders |
 | `lib/tree.ts` | Flat concept list → forest |
 | `lib/layout-tree.ts` | Outline layout: node placement and connector routing |
 | `lib/colors.ts` | The sixteen concept pastels |
-| `app/actions.ts` | Server Actions: sign out, placement, invitations |
+| `app/actions.ts` | Server Actions: sign out, invitations |
 | `components/board-canvas.tsx` | Pan, zoom, edges, node placement |
 | `components/side-panel.tsx` | The editor |
 

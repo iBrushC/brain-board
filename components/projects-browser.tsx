@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition, type ReactNode } from "react";
+import { useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   Building2,
@@ -11,17 +11,20 @@ import {
   LogOut,
   Plus,
   Search,
+  Trash2,
+  Upload,
   UserPlus,
   Users,
   X,
 } from "lucide-react";
-import { inviteMember, revokeInvite, signOut } from "@/app/actions";
+import { acceptInvitation, inviteMember, revokeInvite, signOut } from "@/app/actions";
 import {
   displayName,
   formatDate,
   initials,
   type Invite,
   type Member,
+  type PendingInvitation,
   type PlacedViewer,
   type Role,
 } from "@/lib/accounts";
@@ -35,10 +38,12 @@ type View = "list" | "grid";
 type Props = {
   viewer: PlacedViewer;
   boards: BoardSummary[];
-  /** Admin only; empty for a user, who has no one to scope by. */
+  /** Everyone in the workspace: an admin scopes by them, a user reads who can see their work. */
   members: Member[];
-  /** Admin only. */
+  /** The whole workspace's pending invitations for an admin, the viewer's own otherwise. */
   invites: Invite[];
+  /** An invitation to somewhere else, waiting to be taken. Usually `null`. */
+  invitation: PendingInvitation | null;
 };
 
 /**
@@ -49,15 +54,19 @@ type Props = {
  * row-level security, so an admin's "all projects" is the whole organization
  * and a user's is their own, whatever this component does with it.
  */
-export function ProjectsBrowser({ viewer, boards, members, invites }: Props) {
+export function ProjectsBrowser({ viewer, boards, members, invites, invitation }: Props) {
   const router = useRouter();
   const [view, setView] = useState<View>("list");
   const [query, setQuery] = useState("");
   /** Admin rail selection; `null` is the whole workspace. */
   const [memberId, setMemberId] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const importInput = useRef<HTMLInputElement>(null);
 
   const admin = viewer.role === "admin";
   const byId = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
@@ -80,7 +89,9 @@ export function ProjectsBrowser({ viewer, boards, members, invites }: Props) {
 
   /**
    * Admins can't create boards — `can_write_board` requires not being one — so
-   * the control is absent for them rather than present and rejected.
+   * the control is absent for them rather than present and rejected. Nobody
+   * becomes an admin by accident any more, so this is a deliberate role rather
+   * than a dead end someone signed up into.
    */
   const createBoard = async () => {
     setCreating(true);
@@ -91,6 +102,43 @@ export function ProjectsBrowser({ viewer, boards, members, invites }: Props) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create the project.");
       setCreating(false);
+    }
+  };
+
+  /**
+   * Pulls a local vault folder — the format the app used before the cloud —
+   * into a new board. The browser reads the folder via a directory picker, so
+   * no service key or script is involved.
+   */
+  const importBoard = async (files: FileList) => {
+    setImporting(true);
+    setError(null);
+    try {
+      const result = await api.importBoard(viewer.orgId, viewer.id, Array.from(files));
+      if (result.skipped > 0) {
+        setError(
+          `Imported with ${result.skipped} item${result.skipped === 1 ? "" : "s"} skipped (unreadable or unattached).`,
+        );
+      }
+      router.push(`/board/${result.board.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not import the board.");
+      setImporting(false);
+    }
+  };
+
+  /** Only the owner's own boards can go; RLS enforces it regardless. */
+  const deleteBoard = async (board: BoardSummary) => {
+    if (!window.confirm(`Delete “${board.name}” and all of its concepts and files?`)) return;
+    setDeletingId(board.id);
+    setError(null);
+    try {
+      await api.deleteBoard(board.id);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete the project.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -130,6 +178,8 @@ export function ProjectsBrowser({ viewer, boards, members, invites }: Props) {
           </Button>
         </form>
       </header>
+
+      {invitation && <InvitationBar invitation={invitation} hasBoards={boards.length > 0} />}
 
       <div className="flex min-h-0 flex-1">
         {admin && (
@@ -245,13 +295,61 @@ export function ProjectsBrowser({ viewer, boards, members, invites }: Props) {
               ]}
             />
 
-            {!admin && (
-              <Button variant="primary" disabled={creating} onClick={() => void createBoard()}>
-                <Plus size={12} strokeWidth={2} aria-hidden />
-                {creating ? "Creating…" : "New project"}
+            {!admin && viewer.ownsWorkspace && (
+              <Button
+                variant="ghost"
+                aria-expanded={sharing}
+                onClick={() => setSharing((open) => !open)}
+              >
+                <UserPlus size={12} strokeWidth={2} aria-hidden />
+                Share
               </Button>
             )}
+
+            {!admin && (
+              <>
+                <input
+                  ref={importInput}
+                  type="file"
+                  multiple
+                  // Directory pick aren't standardized; every Chromium build
+                  // and Firefox accept these attributes.
+                  {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+                  className="hidden"
+                  onChange={(e) => {
+                    const files = e.target.files;
+                    if (files && files.length > 0) void importBoard(files);
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  variant="ghost"
+                  disabled={importing}
+                  onClick={() => importInput.current?.click()}
+                >
+                  <Upload size={12} strokeWidth={2} aria-hidden />
+                  {importing ? "Importing…" : "Import board"}
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={creating}
+                  onClick={() => void createBoard()}
+                >
+                  <Plus size={12} strokeWidth={2} aria-hidden />
+                  {creating ? "Creating…" : "New project"}
+                </Button>
+              </>
+            )}
           </div>
+
+          {!admin && viewer.ownsWorkspace && sharing && (
+            <SharePanel
+              viewer={viewer}
+              members={members}
+              invites={invites}
+              onClose={() => setSharing(false)}
+            />
+          )}
 
           <div className="min-h-0 flex-1 overflow-y-auto">
             {projects.length === 0 ? (
@@ -266,14 +364,18 @@ export function ProjectsBrowser({ viewer, boards, members, invites }: Props) {
                 projects={projects}
                 owners={byId}
                 showOwner={admin}
+                deletingId={deletingId}
                 onOpen={open}
+                onDelete={(b) => void deleteBoard(b)}
               />
             ) : (
               <ProjectGrid
                 projects={projects}
                 owners={byId}
                 showOwner={admin}
+                deletingId={deletingId}
                 onOpen={open}
+                onDelete={(b) => void deleteBoard(b)}
               />
             )}
           </div>
@@ -301,6 +403,121 @@ export function ProjectsBrowser({ viewer, boards, members, invites }: Props) {
   );
 }
 
+/**
+ * An invitation to a different workspace. Placement gives every account one of
+ * its own, so an invitation that arrives afterwards has to be taken by hand —
+ * and only from an empty workspace, since the one being left is dropped.
+ */
+function InvitationBar({
+  invitation,
+  hasBoards,
+}: {
+  invitation: PendingInvitation;
+  hasBoards: boolean;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-subtle bg-accent-soft px-3 py-2 text-[11px]">
+      <UserPlus size={12} strokeWidth={1.75} className="text-accent" aria-hidden />
+      <span className="text-ink">
+        You’ve been invited to <span className="font-medium">{invitation.orgName}</span> as{" "}
+        {invitation.role === "admin" ? "an admin" : "a user"}.
+      </span>
+      <span className="text-ink-faint">
+        {hasBoards
+          ? "Joining means leaving this workspace, which your boards live in — delete them first, or stay put."
+          : "Your current workspace is empty, so joining will replace it."}
+      </span>
+
+      {error && <span className="text-danger">{error}</span>}
+
+      <div className="ml-auto">
+        <Button
+          variant="primary"
+          disabled={pending || hasBoards}
+          onClick={() =>
+            start(async () => {
+              const result = await acceptInvitation();
+              if (result?.error) setError(result.error);
+            })
+          }
+        >
+          {pending ? "Joining…" : "Join"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * How a user adds the admin who reads their work. Invitations are the same
+ * mechanism an admin uses from the rail; the difference is only that RLS lets
+ * the workspace's owner send them too, so this is the owner's view of it.
+ */
+function SharePanel({
+  viewer,
+  members,
+  invites,
+  onClose,
+}: {
+  viewer: PlacedViewer;
+  members: Member[];
+  invites: Invite[];
+  onClose: () => void;
+}) {
+  const others = members.filter((member) => member.id !== viewer.id);
+
+  return (
+    <div className="shrink-0 border-b border-border-subtle bg-surface-raised px-3 py-3">
+      <div className="flex max-w-xl flex-col gap-3 sm:flex-row sm:gap-6">
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <SectionLabel>Who can see your work</SectionLabel>
+          {others.length === 0 ? (
+            <p className="text-[11px] leading-relaxed text-ink-muted">
+              Only you. Invite someone as an admin and they’ll be able to read every
+              board in this workspace — but not edit one.
+            </p>
+          ) : (
+            <ul className="space-y-1">
+              {others.map((member) => (
+                <li
+                  key={member.id}
+                  className="flex items-center gap-2 text-[11px] text-ink-muted"
+                >
+                  <Avatar initials={initials(displayName(member.name, member.email))} size={18} />
+                  <span className="min-w-0 flex-1 truncate">
+                    {displayName(member.name, member.email)}
+                  </span>
+                  <RoleBadge role={member.role} />
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {invites.length > 0 && (
+            <div className="space-y-1 pt-2">
+              <SectionLabel>Invited</SectionLabel>
+              <ul>
+                {invites.map((invite) => (
+                  <li key={invite.id}>
+                    <PendingInvite invite={invite} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <div className="w-full sm:w-56">
+          <InviteForm onDone={onClose} defaultRole="admin" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RoleBadge({ role }: { role: Role }) {
   const admin = role === "admin";
   return (
@@ -317,7 +534,7 @@ function RoleBadge({ role }: { role: Role }) {
   );
 }
 
-function InviteForm({ onDone }: { onDone: () => void }) {
+function InviteForm({ onDone, defaultRole = "user" }: { onDone: () => void; defaultRole?: Role }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -341,9 +558,9 @@ function InviteForm({ onDone }: { onDone: () => void }) {
         className={inputClass}
         placeholder="colleague@company.com"
       />
-      <select name="role" className={inputClass} defaultValue="user">
-        <option value="user">Joins as a user</option>
-        <option value="admin">Joins as an admin</option>
+      <select name="role" className={inputClass} defaultValue={defaultRole}>
+        <option value="admin">Joins as an admin — reads every board</option>
+        <option value="user">Joins as a user — keeps their own boards</option>
       </select>
       {error && <p className="text-[11px] leading-relaxed text-danger">{error}</p>}
       <div className="flex gap-1.5">
@@ -436,14 +653,17 @@ type ListProps = {
   projects: BoardSummary[];
   owners: Map<string, Member>;
   showOwner: boolean;
+  /** The board a delete is currently running against, if any. */
+  deletingId: string | null;
   onOpen: (id: string) => void;
+  onDelete: (board: BoardSummary) => void;
 };
 
-function ProjectList({ projects, owners, showOwner, onOpen }: ListProps) {
+function ProjectList({ projects, owners, showOwner, deletingId, onOpen, onDelete }: ListProps) {
   // Written out in full rather than composed, so Tailwind sees both literals.
   const cols = showOwner
-    ? "grid-cols-[minmax(0,1fr)_150px_80px_60px_104px]"
-    : "grid-cols-[minmax(0,1fr)_80px_60px_104px]";
+    ? "grid-cols-[minmax(0,1fr)_150px_80px_60px_104px_28px]"
+    : "grid-cols-[minmax(0,1fr)_80px_60px_104px_28px]";
 
   return (
     <div className="px-3 py-3">
@@ -455,6 +675,7 @@ function ProjectList({ projects, owners, showOwner, onOpen }: ListProps) {
         <span className="text-right">Concepts</span>
         <span className="text-right">Files</span>
         <span className="text-right">Modified</span>
+        <span />
       </div>
 
       <ul>
@@ -462,10 +683,17 @@ function ProjectList({ projects, owners, showOwner, onOpen }: ListProps) {
           const owner = owners.get(project.ownerId);
           return (
             <li key={project.id}>
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => onOpen(project.id)}
-                className={`grid w-full ${cols} items-center gap-3 border border-transparent px-2 py-2 text-left text-xs transition-colors hover:border-border-subtle hover:bg-surface-raised`}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onOpen(project.id);
+                  }
+                }}
+                className={`group grid w-full ${cols} cursor-pointer items-center gap-3 border border-transparent px-2 py-2 text-left text-xs transition-colors hover:border-border-subtle hover:bg-surface-raised`}
               >
                 <span className="flex min-w-0 items-center gap-2">
                   <ProjectIcon color={project.color} />
@@ -488,7 +716,22 @@ function ProjectList({ projects, owners, showOwner, onOpen }: ListProps) {
                 <span className="text-right text-[11px] text-ink-faint">
                   {formatDate(project.updatedAt)}
                 </span>
-              </button>
+                <span className="flex justify-end">
+                  <button
+                    type="button"
+                    disabled={deletingId === project.id}
+                    title="Delete project"
+                    aria-label={`Delete ${project.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(project);
+                    }}
+                    className="text-ink-faint opacity-0 transition-opacity hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-45"
+                  >
+                    <Trash2 size={12} strokeWidth={2} aria-hidden />
+                  </button>
+                </span>
+              </div>
             </li>
           );
         })}
@@ -497,17 +740,17 @@ function ProjectList({ projects, owners, showOwner, onOpen }: ListProps) {
   );
 }
 
-function ProjectGrid({ projects, owners, showOwner, onOpen }: ListProps) {
+function ProjectGrid({ projects, owners, showOwner, deletingId, onOpen, onDelete }: ListProps) {
   return (
     <ul className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-2 p-3">
       {projects.map((project) => {
         const owner = owners.get(project.ownerId);
         return (
-          <li key={project.id}>
+          <li key={project.id} className="group relative">
             <button
               type="button"
               onClick={() => onOpen(project.id)}
-              className="flex h-full w-full flex-col items-start gap-2 border border-border-subtle bg-surface-raised p-3 text-left transition-colors hover:border-accent"
+              className="flex h-full w-full flex-col items-start gap-2 border border-border-subtle bg-surface-raised p-3 pr-8 text-left transition-colors hover:border-accent"
             >
               <ProjectIcon color={project.color} size={20} />
               <span className="line-clamp-2 text-xs text-ink">{project.name}</span>
@@ -522,6 +765,16 @@ function ProjectGrid({ projects, owners, showOwner, onOpen }: ListProps) {
               <span className="mt-auto pt-1 text-[10px] text-ink-faint">
                 {project.conceptCount} concepts · {formatDate(project.updatedAt)}
               </span>
+            </button>
+            <button
+              type="button"
+              disabled={deletingId === project.id}
+              title="Delete project"
+              aria-label={`Delete ${project.name}`}
+              onClick={() => onDelete(project)}
+              className="absolute right-2 top-2 text-ink-faint opacity-0 transition-opacity hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-45"
+            >
+              <Trash2 size={12} strokeWidth={2} aria-hidden />
             </button>
           </li>
         );

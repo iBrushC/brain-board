@@ -1,6 +1,6 @@
 import "server-only";
 import { createClient } from "@/lib/supabase/server";
-import type { Invite, Member, PlacedViewer } from "./accounts";
+import type { Invite, Member, PendingInvitation, PlacedViewer } from "./accounts";
 import { toBoard, toConcepts } from "./mapping";
 import type { Board, BoardSummary, Concept } from "./types";
 
@@ -65,7 +65,10 @@ export async function getBoard(
   };
 }
 
-/** Everyone in the viewer's organization. Admins use it to scope the board list. */
+/**
+ * Everyone in the viewer's organization. Admins use it to scope the board list;
+ * everyone else to see which admins can read over their shoulder.
+ */
 export async function listMembers(viewer: PlacedViewer): Promise<Member[]> {
   const supabase = await createClient();
 
@@ -79,7 +82,10 @@ export async function listMembers(viewer: PlacedViewer): Promise<Member[]> {
   return data ?? [];
 }
 
-/** Invitations sent but not yet accepted. Readable by admins only, per RLS. */
+/**
+ * Invitations sent but not yet accepted. RLS decides the scope: the whole
+ * workspace for an admin, and the ones they sent themselves for anyone else.
+ */
 export async function listPendingInvites(): Promise<Invite[]> {
   const supabase = await createClient();
 
@@ -97,4 +103,23 @@ export async function listPendingInvites(): Promise<Invite[]> {
     role: row.role,
     createdAt: row.created_at,
   }));
+}
+
+/**
+ * An invitation to a workspace the viewer isn't in yet, if one is waiting.
+ *
+ * Every account is placed on first sign-in, so an invitation that arrives later
+ * has nowhere to land on its own; surfacing it here is what lets the viewer
+ * take it. `null` in the ordinary case, which is most of the time.
+ */
+export async function getPendingInvitation(): Promise<PendingInvitation | null> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.rpc("pending_invitation");
+  if (error) return null;
+
+  const invitation = data?.[0];
+  if (!invitation) return null;
+
+  return { orgName: invitation.org_name, role: invitation.role };
 }

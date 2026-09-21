@@ -13,8 +13,8 @@ type Mode = "signin" | "signup";
  * only in whether an unrecognized address is allowed to become an account, so
  * signing in with a typo says so instead of quietly creating a second you.
  *
- * Which workspace you land in isn't decided here — that needs an account to
- * attach the decision to, so it happens on /welcome after the first sign-in.
+ * Which workspace you land in isn't decided here — it needs an account to hang
+ * off, so `ensure_placement` settles it on the first page load afterwards.
  */
 export function AuthForm() {
   const params = useSearchParams();

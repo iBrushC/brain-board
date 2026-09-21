@@ -1,15 +1,16 @@
 /**
  * People: the signed-in viewer, and the members of their organization.
  *
- * One organization per account, decided once when the account is placed —
- * either by creating an organization (which makes you its admin) or by
- * accepting an invitation to one (which makes you a user).
+ * One organization per account, and nobody waits to be given one: signing in
+ * places you in a workspace of your own, unless an invitation was already
+ * addressed to your email, in which case you land in that one instead.
  */
 
 /**
  * `user` creates and edits their own boards. `admin` manages the organization's
  * members and can read every board in it, but cannot write to any board — that
- * boundary is enforced by RLS, not just by what the UI offers.
+ * boundary is enforced by RLS, not just by what the UI offers. You are never
+ * made an admin by your own hand; someone invites you as one.
  */
 export type Role = "user" | "admin";
 
@@ -19,9 +20,15 @@ export type Viewer = {
   name: string;
   email: string;
   role: Role;
-  /** `null` until the account joins or creates an organization. */
+  /** `null` only in the instant between sign-up and placement. */
   orgId: string | null;
   orgName: string | null;
+  /**
+   * Whether this workspace was provisioned for the viewer. The owner is the one
+   * who may invite into it — an admin they add, or a colleague — which someone
+   * invited into a workspace they don't own cannot do.
+   */
+  ownsWorkspace: boolean;
 };
 
 /** A viewer that has been placed in an organization. */
@@ -32,6 +39,12 @@ export type Member = {
   id: string;
   name: string;
   email: string;
+  role: Role;
+};
+
+/** An invitation to a workspace the viewer has not joined. */
+export type PendingInvitation = {
+  orgName: string;
   role: Role;
 };
 

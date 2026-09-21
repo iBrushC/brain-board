@@ -214,18 +214,29 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          owner_id: string | null
         }
         Insert: {
           created_at?: string
           id?: string
           name: string
+          owner_id?: string | null
         }
         Update: {
           created_at?: string
           id?: string
           name?: string
+          owner_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "organizations_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
@@ -288,16 +299,29 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      create_organization: {
-        Args: { org_name: string }
+      pending_invitation: {
+        Args: never
         Returns: {
           created_at: string
+          org_id: string
+          org_name: string
+          role: Database["public"]["Enums"]["member_role"]
+        }[]
+      }
+      ensure_placement: {
+        Args: never
+        Returns: {
+          created_at: string
+          email: string
           id: string
           name: string
+          org_id: string | null
+          role: Database["public"]["Enums"]["member_role"]
+          updated_at: string
         }
         SetofOptions: {
           from: "*"
-          to: "organizations"
+          to: "profiles"
           isOneToOne: true
           isSetofReturn: false
         }

@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 import { ProjectsBrowser } from "@/components/projects-browser";
 import { requirePlacedViewer } from "@/lib/auth";
-import { listBoards, listMembers, listPendingInvites } from "@/lib/boards";
+import {
+  getPendingInvitation,
+  listBoards,
+  listMembers,
+  listPendingInvites,
+} from "@/lib/boards";
 
 export const metadata: Metadata = {
   title: "Projects · Brain Board",
@@ -9,16 +14,18 @@ export const metadata: Metadata = {
 };
 
 export default async function Page() {
+  // Placement happens inside this call on the first request after signing up,
+  // so a brand-new account lands here with a workspace and a New project button.
   const viewer = await requirePlacedViewer();
-  const admin = viewer.role === "admin";
 
   // What comes back is already scoped by RLS: a user's own boards, or every
-  // board in the organization for an admin. The member rail and invite list
-  // are admin-only, so they aren't fetched for anyone else.
-  const [boards, members, invites] = await Promise.all([
+  // board in the organization for an admin; the whole workspace's pending
+  // invitations for an admin, or just the ones this account sent.
+  const [boards, members, invites, invitation] = await Promise.all([
     listBoards(),
-    admin ? listMembers(viewer) : Promise.resolve([]),
-    admin ? listPendingInvites() : Promise.resolve([]),
+    listMembers(viewer),
+    listPendingInvites(),
+    getPendingInvitation(),
   ]);
 
   return (
@@ -27,6 +34,7 @@ export default async function Page() {
       boards={boards}
       members={members}
       invites={invites}
+      invitation={invitation}
     />
   );
 }
