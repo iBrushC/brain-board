@@ -9,7 +9,8 @@ import {
   useState,
 } from "react";
 import type { RefObject } from "react";
-import { layoutForest, NODE_H, NODE_W } from "@/lib/layout-tree";
+import { layoutForest, layoutReferences, NODE_H, NODE_W } from "@/lib/layout-tree";
+import type { Reference } from "@/lib/references";
 import type { ConceptNode as ConceptNodeType, Tag } from "@/lib/types";
 import { ConceptNode } from "./concept-node";
 
@@ -42,6 +43,9 @@ type Props = {
   handleRef: RefObject<BoardHandle | null>;
   /** Hides the per-node editing affordances; panning and collapsing stay. */
   readOnly?: boolean;
+  /** @references between concepts, drawn as arrows when `showReferences` is on. */
+  references?: Reference[];
+  showReferences?: boolean;
   onSelect: (id: string | null) => void;
   onEdit: (id: string) => void;
   onToggleCollapse: (id: string) => void;
@@ -50,6 +54,8 @@ type Props = {
 
 type Transform = { x: number; y: number; k: number };
 
+const NO_REFERENCES: Reference[] = [];
+
 export function BoardCanvas({
   roots,
   tags,
@@ -57,6 +63,8 @@ export function BoardCanvas({
   selectedId,
   handleRef,
   readOnly = false,
+  references = NO_REFERENCES,
+  showReferences = false,
   onSelect,
   onEdit,
   onToggleCollapse,
@@ -66,6 +74,19 @@ export function BoardCanvas({
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, k: 1 });
 
   const layout = useMemo(() => layoutForest(roots, collapsed), [roots, collapsed]);
+
+  const referenceEdges = useMemo(() => {
+    if (!showReferences || references.length === 0) return [];
+    const parentOf = new Map<string, string | null>();
+    const walk = (nodes: ConceptNodeType[], parent: string | null) => {
+      for (const node of nodes) {
+        parentOf.set(node.id, parent);
+        walk(node.children, node.id);
+      }
+    };
+    walk(roots, null);
+    return layoutReferences(layout, references, parentOf);
+  }, [showReferences, references, layout, roots]);
 
   // Once the user pans or zooms they own the view, and the board stops
   // re-framing itself underneath them. "Fit" hands control back.
@@ -260,6 +281,44 @@ export function BoardCanvas({
               strokeLinecap="round"
             />
           ))}
+
+          {referenceEdges.length > 0 && (
+            <>
+              <defs>
+                <marker
+                  id="reference-arrow"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--accent)" />
+                </marker>
+              </defs>
+              {referenceEdges.map((edge) => {
+                // With a node selected its own arrows come forward and the
+                // rest recede; with nothing selected they all sit quietly.
+                const touchesSelected =
+                  selectedId !== null && (edge.from === selectedId || edge.to === selectedId);
+                const opacity = selectedId === null ? 0.45 : touchesSelected ? 1 : 0.15;
+                return (
+                  <path
+                    key={edge.id}
+                    d={edge.d}
+                    fill="none"
+                    stroke="var(--accent)"
+                    strokeWidth={touchesSelected ? 2 : 1.25}
+                    strokeDasharray={edge.dashed ? "5 4" : undefined}
+                    strokeLinecap="round"
+                    markerEnd="url(#reference-arrow)"
+                    opacity={opacity}
+                  />
+                );
+              })}
+            </>
+          )}
         </svg>
 
         {layout.nodes.map((placed) => (

@@ -88,6 +88,9 @@ empty, with no boards and nobody else in it.
 | Collapse a branch | The chevron under a node; the count beside it is what's hidden |
 | Colour a concept | Pick a swatch in the panel, or the crossed circle to clear it |
 | Attach files | Drop them on the panel's file area, or click to browse |
+| Reference another concept | Type `@` in a description and pick from the list (↑/↓, Enter) |
+| Jump to a referenced concept | Click its chip in the description |
+| Show or hide reference arrows | **References** in the header |
 
 Subconcepts stack vertically under their parent, so a plain branch reads top to
 bottom as one column. A subconcept that has children of its own claims the rest
@@ -97,6 +100,14 @@ as the B–D stack with C beside it.
 
 The board keeps itself framed while you build. Once you pan or zoom it leaves
 the view alone until you press **Fit**.
+
+A reference is stored in the description as a markdown link to
+`#concept:<id>`, so it follows the concept through renames and shows its
+current name. With **References** on, each one is drawn as an arrow from the
+concept that mentions it to the concept it names. Selecting a node brings its
+own arrows forward. An arrow whose end is folded away under a collapsed branch
+points at that branch instead, dashed. A reference to a deleted concept stays in
+the text, crossed out. The toggle is remembered per board, in this browser.
 
 Edits to the name, description, and links autosave about half a second after you
 stop typing; the panel header shows the save state. Deleting a concept also
@@ -113,6 +124,9 @@ deletes everything beneath it, along with their attachments, and asks first.
 | `boards` | One board, owned by one profile |
 | `concepts` | The tree; `parent_id` defines it, `sort_order` orders siblings |
 | `concept_files` | Attachment metadata |
+
+References between concepts have no table of their own: they're read out of the
+descriptions (`lib/references.ts`), so the arrows can never disagree with the text.
 
 Attachments themselves go in the private `board-files` bucket under
 `<board id>/<concept id>/<file>`; the bucket's policies read that first path
@@ -148,7 +162,8 @@ command line and keep it out of `.env.local`, which the app loads.
 | `lib/client.ts` | Browser-side board, concept, and file writes |
 | `lib/mapping.ts` | Postgres rows ↔ the shapes the UI renders |
 | `lib/tree.ts` | Flat concept list → forest |
-| `lib/layout-tree.ts` | Outline layout: node placement and connector routing |
+| `lib/layout-tree.ts` | Outline layout: node placement, connector and reference-arrow routing |
+| `lib/references.ts` | The `@` reference link format, and the graph read out of descriptions |
 | `lib/colors.ts` | The sixteen concept pastels |
 | `app/actions.ts` | Server Actions: sign out, invitations |
 | `components/board-canvas.tsx` | Pan, zoom, edges, node placement |

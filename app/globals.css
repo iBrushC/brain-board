@@ -194,6 +194,32 @@ button:focus-visible {
   font-weight: 600;
 }
 
+/* An @reference to another concept: a chip rather than a link, since it moves
+ * the board instead of leaving the page. */
+.concept-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
+  vertical-align: baseline;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0 0.35em;
+  font-size: 0.92em;
+  line-height: 1.45;
+}
+
+button.concept-ref:not(:disabled):hover {
+  border-color: var(--accent);
+}
+
+.concept-ref.is-missing {
+  background: none;
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
 /* Honour a system preference for less motion: the panel snaps instead. */
 @media (prefers-reduced-motion: reduce) {
   *,

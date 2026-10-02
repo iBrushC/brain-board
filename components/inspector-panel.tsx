@@ -1,10 +1,9 @@
 "use client";
 
 import { ExternalLink, FileText, Tag as TagIcon, X } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { swatch } from "@/lib/colors";
 import type { Concept, ConceptFile, Tag } from "@/lib/types";
+import { ConceptMarkdown } from "./concept-markdown";
 import { fileKind } from "./file-viewer";
 import { SectionLabel } from "./ui";
 
@@ -12,6 +11,10 @@ type Props = {
   concept: Concept;
   /** The tag behind the concept's colour, if any — what the tint means. */
   tag: Tag | null;
+  /** Current name of each concept on the board, for rendering @references. */
+  names: Map<string, string>;
+  /** Brings a referenced concept into view on the board. */
+  onJump: (id: string) => void;
   onClose: () => void;
   onOpenFile: (conceptId: string, name: string) => void;
   /** Replaces a file's kind label, e.g. to flag one an HTML export left out. */
@@ -19,7 +22,15 @@ type Props = {
 };
 
 /** Read-only companion to the edit panel: what the concept says, not what it should say. */
-export function InspectorPanel({ concept, tag, onClose, onOpenFile, fileBadge }: Props) {
+export function InspectorPanel({
+  concept,
+  tag,
+  names,
+  onJump,
+  onClose,
+  onOpenFile,
+  fileBadge,
+}: Props) {
   return (
     <aside className="flex h-full w-full flex-col border-l border-border-subtle bg-surface">
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-3 py-2">
@@ -67,7 +78,9 @@ export function InspectorPanel({ concept, tag, onClose, onOpenFile, fileBadge }:
           <SectionLabel>Description</SectionLabel>
           {concept.description.trim() ? (
             <div className="prose-note border border-border-subtle bg-surface-raised px-2.5 py-2">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{concept.description}</ReactMarkdown>
+              <ConceptMarkdown names={names} onJump={onJump}>
+                {concept.description}
+              </ConceptMarkdown>
             </div>
           ) : (
             <p className="text-[11px] text-ink-faint">No description.</p>

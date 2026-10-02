@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Eye, FileDown, Maximize2, Plus } from "lucide-react";
+import { ChevronLeft, Eye, FileDown, Maximize2, Plus, Spline } from "lucide-react";
 import { api } from "@/lib/client";
 import { planExport, type ExportPlan } from "@/lib/export-html";
+import { buildReferenceGraph } from "@/lib/references";
 import { buildTree } from "@/lib/tree";
 import type { Board, Concept, ConceptPatch, Tag } from "@/lib/types";
 import { BoardCanvas, type BoardHandle } from "./board-canvas";
@@ -13,6 +14,7 @@ import { FileViewer } from "./file-viewer";
 import { InspectorPanel } from "./inspector-panel";
 import { SidePanel } from "./side-panel";
 import { Button } from "./ui";
+import { useStoredFlag } from "./use-stored-flag";
 
 const PANEL_W = 360;
 const INSPECTOR_W = 340;
@@ -100,6 +102,12 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
   const boardRef = useRef<BoardHandle>(null);
 
   const roots = useMemo(() => buildTree(concepts), [concepts]);
+  const names = useMemo(() => new Map(concepts.map((c) => [c.id, c.name])), [concepts]);
+  const references = useMemo(() => buildReferenceGraph(concepts), [concepts]);
+  const [showReferences, setShowReferences] = useStoredFlag(
+    `brain-board:refs:${board.id}`,
+    true,
+  );
 
   // The panel animates shut rather than disappearing, so it keeps rendering the
   // concept it was last opened for until something else opens it.
@@ -272,6 +280,25 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
     });
   }, []);
 
+  /** Opens every branch above a concept, then selects it and brings it into view. */
+  const reveal = useCallback(
+    (id: string) => {
+      const parentOf = new Map(concepts.map((c) => [c.id, c.parentId]));
+      const ancestors: string[] = [];
+      for (let p = parentOf.get(id); p; p = parentOf.get(p)) ancestors.push(p);
+      setCollapsed((set) => {
+        if (!ancestors.some((a) => set.has(a))) return set;
+        const next = new Set(set);
+        for (const a of ancestors) next.delete(a);
+        return next;
+      });
+      setSelectedId(id);
+      setInspectorOpen(true);
+      boardRef.current?.focus(id);
+    },
+    [concepts],
+  );
+
   /** Commits the board title on blur; refreshes so the projects list agrees. */
   const renameBoard = async () => {
     const trimmed = name.trim();
@@ -363,6 +390,23 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
         )}
         <Button
           variant="ghost"
+          aria-pressed={showReferences && references.length > 0}
+          disabled={references.length === 0}
+          onClick={() => setShowReferences(!showReferences)}
+          title={
+            references.length === 0
+              ? "No references yet: type @ in a description to link concepts"
+              : showReferences
+                ? "Hide the arrows between referenced concepts"
+                : "Show arrows between referenced concepts"
+          }
+          className={showReferences && references.length > 0 ? "bg-accent-soft text-ink" : ""}
+        >
+          <Spline size={12} strokeWidth={2} aria-hidden />
+          References
+        </Button>
+        <Button
+          variant="ghost"
           onClick={() => boardRef.current?.fit()}
           title="Frame the whole board"
         >
@@ -387,6 +431,8 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
               <SidePanel
                 key={panelConcept.id}
                 concept={panelConcept}
+                concepts={concepts}
+                names={names}
                 tags={tags}
                 onPatch={patch}
                 onCreateTag={createTag}
@@ -399,6 +445,7 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
                 onAddChild={(id) => void addConcept(id)}
                 onDelete={(id) => void removeConcept(id)}
                 onClose={() => setEditingId(null)}
+                onJump={reveal}
               />
             )}
           </div>
@@ -427,6 +474,8 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
               selectedId={selectedId}
               handleRef={boardRef}
               readOnly={readOnly}
+              references={references}
+              showReferences={showReferences}
               onSelect={(id) => {
                 setSelectedId(id);
                 if (id !== null) setInspectorOpen(true);
@@ -451,6 +500,8 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
                 key={inspectConcept.id}
                 concept={inspectConcept}
                 tag={inspectConcept.tagId ? (tagById.get(inspectConcept.tagId) ?? null) : null}
+                names={names}
+                onJump={reveal}
                 onClose={() => {
                   setInspectorOpen(false);
                   setLastInspectedId(selectedId);

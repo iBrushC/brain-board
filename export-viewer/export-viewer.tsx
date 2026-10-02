@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Maximize2, Search, Tag as TagIcon } from "lucide-react";
+import { Maximize2, Search, Spline, Tag as TagIcon } from "lucide-react";
 import { BoardCanvas, type BoardHandle } from "@/components/board-canvas";
 import { FileViewer } from "@/components/file-viewer";
 import { InspectorPanel } from "@/components/inspector-panel";
@@ -9,6 +9,7 @@ import { Button, inputClass } from "@/components/ui";
 import { swatch } from "@/lib/colors";
 import type { ExportPayload } from "@/lib/export-format";
 import { FILE_ELEMENT_PREFIX } from "@/lib/export-format";
+import { buildReferenceGraph } from "@/lib/references";
 import { buildTree } from "@/lib/tree";
 import type { Concept, ConceptFile, ConceptLink } from "@/lib/types";
 
@@ -44,6 +45,10 @@ export function ExportViewer({ payload }: { payload: ExportPayload }) {
   const roots = useMemo(() => buildTree(concepts), [concepts]);
   const byId = useMemo(() => new Map(concepts.map((c) => [c.id, c])), [concepts]);
   const tagById = useMemo(() => new Map(board.tags.map((t) => [t.id, t])), [board.tags]);
+  const names = useMemo(() => new Map(concepts.map((c) => [c.id, c.name])), [concepts]);
+  const references = useMemo(() => buildReferenceGraph(concepts), [concepts]);
+  // Not remembered: an export is a snapshot, and has no board id to key on.
+  const [showReferences, setShowReferences] = useState(true);
 
   const [collapsed, setCollapsed] = useState<Set<string>>(
     () => new Set(payload.collapsed.filter((id) => byId.has(id))),
@@ -99,6 +104,22 @@ export function ExportViewer({ payload }: { payload: ExportPayload }) {
         <ConceptSearch concepts={concepts} byId={byId} onPick={reveal} />
         {board.tags.length > 0 && <TagLegend payload={payload} />}
 
+        {references.length > 0 && (
+          <Button
+            variant="ghost"
+            aria-pressed={showReferences}
+            onClick={() => setShowReferences((v) => !v)}
+            title={
+              showReferences
+                ? "Hide the arrows between referenced concepts"
+                : "Show arrows between referenced concepts"
+            }
+            className={showReferences ? "bg-accent-soft text-ink" : ""}
+          >
+            <Spline size={12} strokeWidth={2} aria-hidden />
+            References
+          </Button>
+        )}
         <Button
           variant="ghost"
           onClick={() => boardRef.current?.fit()}
@@ -123,6 +144,8 @@ export function ExportViewer({ payload }: { payload: ExportPayload }) {
               selectedId={selectedId}
               handleRef={boardRef}
               readOnly
+              references={references}
+              showReferences={showReferences}
               onSelect={setSelectedId}
               onEdit={() => {}}
               onToggleCollapse={toggleCollapse}
@@ -137,6 +160,8 @@ export function ExportViewer({ payload }: { payload: ExportPayload }) {
               key={selected.id}
               concept={selected}
               tag={selected.tagId ? (tagById.get(selected.tagId) ?? null) : null}
+              names={names}
+              onJump={reveal}
               onClose={() => setSelectedId(null)}
               onOpenFile={(conceptId, name) => setViewingFile({ conceptId, name })}
               fileBadge={(file) => (missingFiles.has(file.id) ? "not included" : null)}

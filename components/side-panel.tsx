@@ -13,17 +13,21 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { CONCEPT_COLORS, swatch } from "@/lib/colors";
 import type { ConceptColor } from "@/lib/colors";
 import type { Concept, ConceptLink, ConceptPatch, Tag } from "@/lib/types";
+import { ConceptMarkdown } from "./concept-markdown";
+import { ReferenceTextarea } from "./reference-textarea";
 import { Button, inputClass, SectionLabel } from "./ui";
 
 const AUTOSAVE_MS = 600;
 
 type Props = {
   concept: Concept;
+  /** Every concept on the board, for @references and their current names. */
+  concepts: Concept[];
+  /** Current name of each concept, keyed by id. */
+  names: Map<string, string>;
   /** This board's tag vocabulary: what each colour means here. */
   tags: Tag[];
   onPatch: (id: string, patch: ConceptPatch) => Promise<void>;
@@ -35,12 +39,16 @@ type Props = {
   onAddChild: (id: string) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
+  /** Brings a referenced concept into view on the board. */
+  onJump: (id: string) => void;
 };
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export function SidePanel({
   concept,
+  concepts,
+  names,
   tags,
   onPatch,
   onCreateTag,
@@ -51,6 +59,7 @@ export function SidePanel({
   onAddChild,
   onDelete,
   onClose,
+  onJump,
 }: Props) {
   const [name, setName] = useState(concept.name);
   const [description, setDescription] = useState(concept.description);
@@ -183,16 +192,20 @@ export function SidePanel({
           </div>
 
           {editingBody ? (
-            <textarea
+            <ReferenceTextarea
               autoFocus
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Markdown supported…"
+              onChange={setDescription}
+              concepts={concepts}
+              selfId={concept.id}
+              placeholder="Markdown supported. Type @ to reference another concept…"
               className={`${inputClass} min-h-56 resize-y font-mono leading-relaxed`}
             />
           ) : description.trim() ? (
             <div className="prose-note border border-border-subtle bg-surface-raised px-2.5 py-2">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{description}</ReactMarkdown>
+              <ConceptMarkdown names={names} onJump={onJump}>
+                {description}
+              </ConceptMarkdown>
             </div>
           ) : (
             <button

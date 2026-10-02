@@ -1,3 +1,4 @@
+import type { Reference } from "./references";
 import type { ConceptNode } from "./types";
 
 export const NODE_W = 260;
@@ -182,6 +183,98 @@ function connector(
   points.push([childSpineX, endY], [cx, endY]);
 
   return roundedPath(points);
+}
+
+export type ReferenceEdge = {
+  id: string;
+  /** The nodes the arrow is actually drawn between, after collapsing. */
+  from: string;
+  to: string;
+  d: string;
+  /** One end stands in for a concept hidden under a collapsed branch. */
+  dashed: boolean;
+};
+
+/** How far a reference arrow bows away from the straight line, at most. */
+const REF_BOW = 56;
+
+/**
+ * Reference arrows over an existing layout. An end hidden under a collapsed
+ * branch moves up to the nearest ancestor that's on screen, and arrows that end
+ * up sharing both ends are merged — drawn solid if any of them was direct.
+ */
+export function layoutReferences(
+  layout: Layout,
+  references: Reference[],
+  parentOf: Map<string, string | null>,
+): ReferenceEdge[] {
+  const placed = new Map(layout.nodes.map((p) => [p.node.id, p]));
+
+  const visible = (id: string): string | null => {
+    for (let at: string | null | undefined = id; at; at = parentOf.get(at)) {
+      if (placed.has(at)) return at;
+    }
+    return null;
+  };
+
+  const merged = new Map<string, ReferenceEdge>();
+  for (const ref of references) {
+    const from = visible(ref.from);
+    const to = visible(ref.to);
+    // Both ends folded into the same node: there's nothing to point across.
+    if (!from || !to || from === to) continue;
+
+    const dashed = from !== ref.from || to !== ref.to;
+    const id = `ref:${from}->${to}`;
+    const existing = merged.get(id);
+    if (existing) {
+      existing.dashed &&= dashed;
+      continue;
+    }
+    merged.set(id, {
+      id,
+      from,
+      to,
+      dashed,
+      d: referenceCurve(placed.get(from)!, placed.get(to)!),
+    });
+  }
+
+  return [...merged.values()];
+}
+
+/**
+ * A gentle curve between the facing sides of two nodes. It always bows to the
+ * left of its direction of travel, so A→B and B→A separate instead of
+ * drawing on top of each other, and the bend keeps it from reading as part of
+ * the square tree connectors.
+ */
+function referenceCurve(from: PlacedNode, to: PlacedNode): string {
+  const [sx, sy] = facingSide(from, to);
+  const [tx, ty] = facingSide(to, from);
+
+  const dx = tx - sx;
+  const dy = ty - sy;
+  const length = Math.hypot(dx, dy) || 1;
+  const bow = Math.min(REF_BOW, length * 0.2);
+  const cx = (sx + tx) / 2 + (dy / length) * bow;
+  const cy = (sy + ty) / 2 - (dx / length) * bow;
+
+  return `M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`;
+}
+
+/** Midpoint of the side of `node` that faces `other`. */
+function facingSide(node: PlacedNode, other: PlacedNode): Point {
+  const cx = node.x + NODE_W / 2;
+  const cy = node.y + NODE_H / 2;
+  const dx = other.x + NODE_W / 2 - cx;
+  const dy = other.y + NODE_H / 2 - cy;
+
+  // Compared in proportion to the box, since nodes are much wider than tall.
+  if (Math.abs(dx) / NODE_W > Math.abs(dy) / NODE_H) {
+    return [dx > 0 ? node.x + NODE_W : node.x, cy];
+  }
+  return [cx, dy > 0 ? node.y + NODE_H : node.y];
 }
 
 /** Polyline with the corners eased off, so branches don't look like circuitry. */
