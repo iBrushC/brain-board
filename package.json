@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "build:export-viewer": "node scripts/build-export-viewer.mjs",
+    "predev": "npm run build:export-viewer",
     "dev": "next dev",
+    "prebuild": "npm run build:export-viewer",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -21,10 +24,12 @@
     "server-only": "^0.0.1"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { Download, X } from "lucide-react";
-import { api } from "@/lib/client";
 import type { ConceptFile } from "@/lib/types";
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif|ico)$/i;
@@ -19,10 +18,16 @@ export function fileKind(name: string, size: number): "image" | "pdf" | "text" |
   return "other";
 }
 
-export function FileViewer({ file, onClose }: { file: ConceptFile; onClose: () => void }) {
+type Props = {
+  file: ConceptFile;
+  /** Turns a file into something the browser can load: a signed URL in the app,
+   * a blob URL in an HTML export. Async, which is why the viewer starts empty. */
+  resolveUrl: (file: ConceptFile) => Promise<string>;
+  onClose: () => void;
+};
+
+export function FileViewer({ file, resolveUrl, onClose }: Props) {
   const kind = fileKind(file.label, file.size);
-  // The bucket is private, so there is no stable URL to render — every view
-  // mints a short-lived signed one, which is why this starts empty.
   const [url, setUrl] = useState<string | null>(null);
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,12 +36,12 @@ export function FileViewer({ file, onClose }: { file: ConceptFile; onClose: () =
     let alive = true;
     void (async () => {
       try {
-        const signed = await api.signedFileUrl(file);
+        const resolved = await resolveUrl(file);
         if (!alive) return;
-        setUrl(signed);
+        setUrl(resolved);
 
         if (fileKind(file.label, file.size) === "text") {
-          const res = await fetch(signed);
+          const res = await fetch(resolved);
           const body = await res.text();
           if (alive) setText(body);
         }
@@ -47,7 +52,7 @@ export function FileViewer({ file, onClose }: { file: ConceptFile; onClose: () =
     return () => {
       alive = false;
     };
-  }, [file]);
+  }, [file, resolveUrl]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

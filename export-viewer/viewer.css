@@ -1,0 +1,15 @@
+/*
+ * Styles for the HTML export viewer: the app's own theme, compiled by the
+ * Tailwind CLI into a single stylesheet that is inlined into each export.
+ */
+@import "../app/globals.css";
+
+@source "../components";
+@source "../export-viewer";
+
+/* The app loads Geist through next/font, which an offline file can't. System
+ * fonts keep the export small and still read cleanly. */
+:root {
+  --font-geist-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}

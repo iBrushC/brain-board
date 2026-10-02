@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Eye, Maximize2, Plus } from "lucide-react";
+import { ChevronLeft, Eye, FileDown, Maximize2, Plus } from "lucide-react";
 import { api } from "@/lib/client";
+import { planExport, type ExportPlan } from "@/lib/export-html";
 import { buildTree } from "@/lib/tree";
 import type { Board, Concept, ConceptPatch, Tag } from "@/lib/types";
 import { BoardCanvas, type BoardHandle } from "./board-canvas";
+import { ExportDialog } from "./export-dialog";
 import { FileViewer } from "./file-viewer";
 import { InspectorPanel } from "./inspector-panel";
 import { SidePanel } from "./side-panel";
@@ -92,6 +94,8 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
   );
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  // Planned when the dialog opens, so it describes the board as it is then.
+  const [exportPlan, setExportPlan] = useState<ExportPlan | null>(null);
 
   const boardRef = useRef<BoardHandle>(null);
 
@@ -341,6 +345,22 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
             Add root concept
           </Button>
         )}
+        {/* Owner only: an admin reading over someone's shoulder shouldn't be
+            one click from mailing the board out of the workspace. */}
+        {!readOnly && (
+          <Button
+            variant="ghost"
+            title="Download a self-contained HTML copy anyone can open"
+            onClick={() =>
+              setExportPlan(
+                planExport({ name, color: board.color, tags, concepts, collapsed }),
+              )
+            }
+          >
+            <FileDown size={12} strokeWidth={2} aria-hidden />
+            Export
+          </Button>
+        )}
         <Button
           variant="ghost"
           onClick={() => boardRef.current?.fit()}
@@ -453,10 +473,13 @@ export function BoardApp({ board, initialConcepts, readOnly }: Props) {
             <FileViewer
               key={file.id}
               file={file}
+              resolveUrl={api.signedFileUrl}
               onClose={() => setViewingFile(null)}
             />
           );
         })()}
+
+      {exportPlan && <ExportDialog plan={exportPlan} onClose={() => setExportPlan(null)} />}
     </div>
   );
 }

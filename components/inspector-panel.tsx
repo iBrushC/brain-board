@@ -4,7 +4,7 @@ import { ExternalLink, FileText, Tag as TagIcon, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { swatch } from "@/lib/colors";
-import type { Concept, Tag } from "@/lib/types";
+import type { Concept, ConceptFile, Tag } from "@/lib/types";
 import { fileKind } from "./file-viewer";
 import { SectionLabel } from "./ui";
 
@@ -14,10 +14,12 @@ type Props = {
   tag: Tag | null;
   onClose: () => void;
   onOpenFile: (conceptId: string, name: string) => void;
+  /** Replaces a file's kind label, e.g. to flag one an HTML export left out. */
+  fileBadge?: (file: ConceptFile) => string | null;
 };
 
 /** Read-only companion to the edit panel: what the concept says, not what it should say. */
-export function InspectorPanel({ concept, tag, onClose, onOpenFile }: Props) {
+export function InspectorPanel({ concept, tag, onClose, onOpenFile, fileBadge }: Props) {
   return (
     <aside className="flex h-full w-full flex-col border-l border-border-subtle bg-surface">
       <header className="flex shrink-0 items-center justify-between gap-2 border-b border-border-subtle px-3 py-2">
@@ -117,7 +119,10 @@ export function InspectorPanel({ concept, tag, onClose, onOpenFile }: Props) {
                       {file.label}
                     </span>
                     <span className="shrink-0 font-mono text-[10px] text-ink-faint">
-                      {fileKind(file.label, file.size) === "other" ? "file" : fileKind(file.label, file.size)}
+                      {fileBadge?.(file) ??
+                        (fileKind(file.label, file.size) === "other"
+                          ? "file"
+                          : fileKind(file.label, file.size))}
                     </span>
                   </button>
                 </li>

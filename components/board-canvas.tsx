@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 import type { RefObject } from "react";
-import { layoutForest } from "@/lib/layout-tree";
+import { layoutForest, NODE_H, NODE_W } from "@/lib/layout-tree";
 import type { ConceptNode as ConceptNodeType, Tag } from "@/lib/types";
 import { ConceptNode } from "./concept-node";
 
@@ -28,6 +28,9 @@ export type BoardHandle = {
   /** Shifts the board horizontally, in screen px. Called in the same frame the
    * panel width changes, so the nodes stay visually still during the slide. */
   shift: (dx: number) => void;
+  /** Centres the view on one concept. If it's hidden under a collapsed branch,
+   * the move waits for the caller's expand to land and happens on that layout. */
+  focus: (id: string) => void;
 };
 
 type Props = {
@@ -90,14 +93,48 @@ export function BoardCanvas({
     });
   }, [layout]);
 
+  // A focus request outlives the layout it was made against, so it is parked
+  // here until a layout that actually contains the concept comes along.
+  const pendingFocus = useRef<string | null>(null);
+  const layoutRef = useRef(layout);
+
+  const tryFocus = useCallback(() => {
+    const id = pendingFocus.current;
+    const viewport = viewportRef.current;
+    if (!id || !viewport) return;
+    const placed = layoutRef.current.nodes.find((p) => p.node.id === id);
+    if (!placed) return;
+
+    pendingFocus.current = null;
+    userMoved.current = true;
+    setTransform((t) => {
+      // Close enough to read the node, without yanking a zoomed-in view out.
+      const k = clamp(Math.max(t.k, 0.8), MIN_ZOOM, MAX_ZOOM);
+      return {
+        k,
+        x: viewport.clientWidth / 2 - (placed.x + NODE_W / 2) * k,
+        y: viewport.clientHeight / 2 - (placed.y + NODE_H / 2) * k,
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    layoutRef.current = layout;
+    tryFocus();
+  }, [layout, tryFocus]);
+
   useImperativeHandle(
     handleRef,
     () => ({
       fit,
       shift: (dx: number) =>
         setTransform((t) => ({ ...t, x: t.x - dx })),
+      focus: (id: string) => {
+        pendingFocus.current = id;
+        tryFocus();
+      },
     }),
-    [fit],
+    [fit, tryFocus],
   );
 
   const fitRef = useRef(fit);

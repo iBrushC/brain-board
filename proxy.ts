@@ -8,6 +8,7 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     // Everything but static assets, so auth redirects can't swallow CSS or images.
-    "/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // The export viewer is generic code with no board data in it.
+    "/((?!_next/static|_next/image|favicon.ico|export-viewer/|.*\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
