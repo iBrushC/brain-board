@@ -48,6 +48,9 @@ export async function updateSession(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.search = "";
+    // Remember where they were headed, so signing in lands them back there.
+    const { pathname, search } = request.nextUrl;
+    if (pathname !== "/") url.searchParams.set("next", pathname + search);
     return NextResponse.redirect(url);
   }
 

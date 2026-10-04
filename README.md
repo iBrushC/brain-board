@@ -29,8 +29,10 @@ Both are safe in the browser — every table and every stored file is gated by
 row-level security, so the key grants nothing on its own.
 
 In the Supabase dashboard, **Authentication → URL Configuration** has to list
-`http://localhost:3000/auth/confirm` as a redirect URL (plus the deployed
-origin), or the sign-in link will bounce.
+`http://localhost:3000/auth/confirm**` as a redirect URL (plus the same for the
+deployed origin), or the sign-in link will bounce. The trailing `**` matters:
+the link carries a `?next=` path so a sign-in that started on another page — the
+agent consent screen, say — lands back on it.
 
 ## Accounts and workspaces
 
@@ -136,6 +138,52 @@ opening a file mints a short-lived signed URL.
 Deleting a concept cascades to its descendants and their file rows in Postgres.
 Stored objects don't cascade, so the app removes those explicitly first.
 
+## Connecting an AI agent (MCP)
+
+`/api/mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server,
+so Claude and other agents can read boards and edit them on your behalf:
+summarize a board, check it for inconsistencies, add sources to a concept,
+write up a new one.
+
+**Adding it.** In claude.ai or Claude Desktop: *Settings → Connectors → Add
+custom connector*, URL `https://<your deployment>/api/mcp`. In Claude Code:
+`claude mcp add --transport http brain-board https://<your deployment>/api/mcp`.
+Either one opens a browser to sign in (the usual email link) and asks you to
+allow access.
+
+**What it can do.** Read every board your account can open, including text
+attachments; create concepts, edit names, descriptions, tags and links, and move
+concepts. It can't delete anything, create boards, or upload files. It acts as
+you, under the same row-level security as the board, so an admin's agent is
+read-only too. A board that's already open needs a refresh to show its changes.
+
+| Tool | Does |
+| --- | --- |
+| `list_boards` | Boards you can open, with their tags |
+| `get_board` | The whole outline plus every concept's details |
+| `get_concept` | One concept, its place in the tree, and its references |
+| `search_concepts` | Text search over names and descriptions |
+| `read_file` | Contents of a text attachment (up to 512 KB) |
+| `create_concept` | New concept under a parent, or at the top level |
+| `update_concept` | Name, description, tag, or links |
+| `add_links` | Appends links, skipping URLs already there |
+| `move_concept` | Re-parent or reorder |
+
+**One-time setup** (Supabase dashboard, **Authentication → OAuth Server**):
+
+1. Enable the OAuth 2.1 server.
+2. Set the authorization path to `/oauth/consent`, with the site URL pointing
+   at the deployment.
+3. Turn on dynamic client registration — claude.ai registers itself that way.
+
+Sign-in is Supabase's: the agent is sent there by
+`/.well-known/oauth-protected-resource`, Supabase sends the browser to
+`/oauth/consent` to ask, and the token it issues is your own session JWT.
+Nothing new is stored in the app, and there are no extra environment variables.
+
+To poke at it locally, run `npx @modelcontextprotocol/inspector` and connect to
+`http://localhost:3000/api/mcp`.
+
 ## Importing an old vault
 
 Earlier versions kept each concept as a markdown file in a folder on disk. To
@@ -156,7 +204,7 @@ command line and keep it out of `.env.local`, which the app loads.
 | Path | Purpose |
 | --- | --- |
 | `proxy.ts` | Refreshes the session, bounces signed-out traffic to `/login` |
-| `lib/supabase/*` | The three clients: browser, server, proxy |
+| `lib/supabase/*` | The clients: browser, server, proxy, and bearer token (MCP) |
 | `lib/auth.ts` | Resolving the signed-in viewer, placing it; the gate every page calls |
 | `lib/boards.ts` | Server-side reads for the projects and board screens |
 | `lib/client.ts` | Browser-side board, concept, and file writes |
@@ -165,13 +213,19 @@ command line and keep it out of `.env.local`, which the app loads.
 | `lib/layout-tree.ts` | Outline layout: node placement, connector and reference-arrow routing |
 | `lib/references.ts` | The `@` reference link format, and the graph read out of descriptions |
 | `lib/colors.ts` | The sixteen concept pastels |
+| `lib/concept-writes.ts` | Concept write details shared by the browser and the MCP server |
+| `lib/mcp/*` | MCP tools and the text they render boards as |
+| `app/api/mcp/route.ts` | The MCP endpoint; verifies the bearer token |
+| `app/oauth/consent/` | Where you allow or deny an agent |
 | `app/actions.ts` | Server Actions: sign out, invitations |
 | `components/board-canvas.tsx` | Pan, zoom, edges, node placement |
 | `components/side-panel.tsx` | The editor |
 
 Writes go straight from the browser to Postgres rather than through a route
 handler. There's no API layer to enforce anything, because row-level security
-already does — a hand-rolled request reaches exactly what the UI could.
+already does — a hand-rolled request reaches exactly what the UI could. The MCP
+endpoint is the one route handler that writes, and it holds to the same rule:
+it queries with the caller's token, never a service key.
 
 ## Not in this version
 
@@ -179,5 +233,5 @@ already does — a hand-rolled request reaches exactly what the UI could.
   there is no UI for it yet)
 - Setting a board's colour (the column and the tinted folder icons exist; only
   the importer and the database can set it)
-- Search across concepts
+- Search across concepts in the UI (agents have `search_concepts`)
 - Undo
