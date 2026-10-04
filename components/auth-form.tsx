@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowRight, MailCheck, RotateCcw } from "lucide-react";
+import { safeNext } from "@/lib/redirects";
 import { createClient } from "@/lib/supabase/client";
 import { Button, inputClass, SectionLabel, Segmented } from "./ui";
 
@@ -38,7 +39,12 @@ export function AuthForm() {
       email: address,
       options: {
         shouldCreateUser: signup,
-        emailRedirectTo: `${window.location.origin}/auth/confirm`,
+        // Carries `next` through the email, so a sign-in that started on the
+        // OAuth consent screen ends back on it. Left off otherwise, so an
+        // ordinary sign-in still matches a redirect allow-list without `**`.
+        emailRedirectTo:
+          `${window.location.origin}/auth/confirm` +
+          (params.get("next") ? `?next=${encodeURIComponent(safeNext(params.get("next")))}` : ""),
         // Read by the trigger that mirrors auth.users into profiles.
         data: signup ? { name: name.trim() } : undefined,
       },

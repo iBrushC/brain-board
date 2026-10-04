@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { load as loadYaml } from "js-yaml";
 import type { ConceptColor } from "./colors";
+import { conceptUpdateRow, nextSortOrder } from "./concept-writes";
 import {
   sanitizeFileName,
   storagePathFor,
@@ -103,26 +104,13 @@ export const api = {
   ): Promise<Concept> {
     const supabase = createClient();
 
-    // Land after the current last sibling. A race here costs a tie in `order`,
-    // which the tree sort breaks by name rather than surfacing as an error.
-    const siblings = supabase
-      .from("concepts")
-      .select("sort_order")
-      .eq("board_id", boardId)
-      .order("sort_order", { ascending: false })
-      .limit(1);
-
-    const { data: last } = parentId
-      ? await siblings.eq("parent_id", parentId)
-      : await siblings.is("parent_id", null);
-
     const { data, error } = await supabase
       .from("concepts")
       .insert({
         board_id: boardId,
         parent_id: parentId,
         name: name.trim() || "New concept",
-        sort_order: (last?.[0]?.sort_order ?? -1) + 1,
+        sort_order: await nextSortOrder(supabase, boardId, parentId),
       })
       .select()
       .single();
@@ -140,21 +128,7 @@ export const api = {
 
     const { data, error } = await supabase
       .from("concepts")
-      .update({
-        ...(patch.name !== undefined ? { name: patch.name.trim() || concept.name } : {}),
-        ...(patch.description !== undefined ? { description: patch.description } : {}),
-        ...(patch.parentId !== undefined ? { parent_id: patch.parentId } : {}),
-        ...(patch.order !== undefined ? { sort_order: patch.order } : {}),
-        ...(patch.color !== undefined ? { color: patch.color } : {}),
-        ...(patch.tagId !== undefined ? { tag_id: patch.tagId } : {}),
-        ...(patch.links !== undefined
-          ? {
-              links: patch.links
-                .filter((l) => l.url.trim())
-                .map((l) => ({ label: l.label.trim() || l.url.trim(), url: l.url.trim() })),
-            }
-          : {}),
-      })
+      .update(conceptUpdateRow(concept, patch))
       .eq("id", concept.id)
       .select()
       .single();

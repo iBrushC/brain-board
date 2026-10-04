@@ -1,4 +1,6 @@
 import "server-only";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/lib/database.types";
 import { createClient } from "@/lib/supabase/server";
 import type { Invite, Member, PendingInvitation, PlacedViewer } from "./accounts";
 import { toBoard, toConcepts } from "./mapping";
@@ -8,14 +10,19 @@ import type { Board, BoardSummary, Concept } from "./types";
  * Reads for the server-rendered screens. Every query here runs as the signed-in
  * user, so RLS — not these functions — decides what comes back: a user sees
  * only their own boards, an admin sees every board in the organization.
+ *
+ * The board reads take an optional client so the MCP endpoint, which signs in
+ * with a bearer token instead of a cookie, gets the same queries and shapes.
  */
 
 /**
  * Boards the viewer can open, newest edit first. The counts come from the
  * related tables in the same round trip rather than N follow-up queries.
  */
-export async function listBoards(): Promise<BoardSummary[]> {
-  const supabase = await createClient();
+export async function listBoards(
+  client?: SupabaseClient<Database>,
+): Promise<BoardSummary[]> {
+  const supabase = client ?? (await createClient());
 
   const { data, error } = await supabase
     .from("boards")
@@ -37,8 +44,9 @@ export async function listBoards(): Promise<BoardSummary[]> {
 /** One board with its whole concept tree, or `null` if it isn't readable. */
 export async function getBoard(
   boardId: string,
+  client?: SupabaseClient<Database>,
 ): Promise<{ board: Board; concepts: Concept[] } | null> {
-  const supabase = await createClient();
+  const supabase = client ?? (await createClient());
 
   const { data: boardRow } = await supabase
     .from("boards")
